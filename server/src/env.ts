@@ -44,7 +44,7 @@ export const env = {
   // ---- Hermes engine ----
   /** The `hermes` CLI used to start a gateway for each extra bot. */
   hermesBin: process.env.HERMES_BIN ?? 'hermes',
-  /** The primary bot's Hermes home and API server (an agent that already runs; never restarted by us). */
+  /** The primary bot's Hermes home and API server (an agent that already runs; never restarted by us). An empty HERMES_URL means there is none. */
   hermesHome,
   hermesUrl: (process.env.HERMES_URL ?? 'http://127.0.0.1:8642').replace(/\/+$/, ''),
   hermesKey: process.env.HERMES_KEY ?? '',

@@ -5,7 +5,7 @@
 // It checks that a heavy job goes to the worker, that a job is paused when the worker "sleeps"
 // (SIGSTOP) and carries on when it wakes, and that a job whose worker died is started again with a
 // note of what was already done. Needs nothing but `npm ci`; takes about a minute.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +16,9 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mibot-machines-'));
 const HUB = 'http://127.0.0.1:18791';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const children = [];
+// The hub starts a screen for each bot; the ones that appear during the test are stopped at the end.
+const screens = () => spawnSync('pgrep', ['-x', 'Xvfb']).stdout.toString().split('\n').filter(Boolean);
+const screensBefore = new Set(screens());
 
 // ---------- a stand-in for `hermes gateway run` ----------
 // Each "tool call" takes `delay` ms; the last "steps=N delay=M" in the input sets the pace.
@@ -158,6 +161,8 @@ try {
       try { process.kill(JSON.parse(fs.readFileSync(path.join(engines, id, 'gateway.pid'), 'utf8')).pid, 'SIGKILL'); } catch { /* not running */ }
     }
   }
+  spawnSync('pkill', ['-KILL', '-f', dir]); // what the screens were running
+  for (const pid of screens()) if (!screensBefore.has(pid)) { try { process.kill(Number(pid), 'SIGKILL'); } catch { /* gone */ } }
   if (failed) console.error(`Logs are in ${dir}`);
   else fs.rmSync(dir, { recursive: true, force: true });
 }
