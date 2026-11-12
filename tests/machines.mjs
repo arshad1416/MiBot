@@ -5,8 +5,9 @@
 // It checks that a machine is added with a one-time code (from the command line and from the page a
 // worker serves), that a heavy job goes to the worker, that a job is paused when the worker "sleeps"
 // (SIGSTOP) and carries on when it wakes, that a job whose worker died is started again with a
-// note of what was already done, and that a new bot's model can be chosen while its agent is still
-// starting. Needs nothing but `npm ci`; takes about a minute.
+// note of what was already done, that a new bot's model can be chosen while its agent is still
+// starting, and that a key, an endpoint or a sign-in added in Settings reaches every agent.
+// Needs nothing but `npm ci`; takes about a minute.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,11 +26,16 @@ const screensBefore = new Set(screens());
 // ---------- a stand-in for `hermes gateway run` ----------
 // Each "tool call" takes `delay` ms; the last "steps=N delay=M" in the input sets the pace.
 // While the file `slow-start` exists, a gateway that is starting does not answer yet.
+// `hermes auth add <provider>` signs its home in at once.
 fs.writeFileSync(path.join(dir, 'stub-hermes.mjs'), `
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 const home = process.env.HERMES_HOME;
+if (process.argv[2] === 'auth') {
+  fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ version: 1, providers: { [process.argv[4]]: { token: 'signed-in' } } }));
+  process.exit(0);
+}
 const env = Object.fromEntries(fs.readFileSync(path.join(home, '.env'), 'utf8').split('\\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
 fs.writeFileSync(path.join(home, 'gateway.pid'), JSON.stringify({ pid: process.pid, hermes_home: home }));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -195,6 +201,34 @@ try {
   fs.rmSync(slowStart);
   const ready = await until('the new agent to start', async () => { const e = await engine(); return e.status === 'ready' && e; });
   check('and keeps the model chosen meanwhile', ready.model === 'stub-small' && ready.providers.length === 1);
+
+  // What is added in Settings › Models reaches every agent: the one on the hub at once, the one on another machine with its next job.
+  const hubHome = path.join(dir, 'hub-engines', newcomer.id);
+  const laptopHome = path.join(dir, 'laptop', 'engines', bot.id);
+  const read = (home, file) => fs.readFileSync(path.join(home, file), 'utf8');
+  fs.appendFileSync(path.join(hubHome, '.env'), 'MY_OWN=kept\n');
+  await api('POST', '/models/endpoints', { name: '9Router', baseUrl: 'http://localhost:20128/v1/', key: 'sk-router-secret', models: 'cx/gpt-6-luna, cc/claude' });
+  await api('PUT', '/models/keys/openrouter', { key: 'sk-or-secret' });
+  check('a key added in Settings reaches a bot’s agent', read(hubHome, '.env').includes('OPENROUTER_API_KEY=sk-or-secret'));
+  check('so does an endpoint', read(hubHome, 'config.yaml').includes('api: http://localhost:20128/v1\n') && read(hubHome, 'config.yaml').includes('key_env: APP_9ROUTER_API_KEY') && read(hubHome, 'config.yaml').includes('cx/gpt-6-luna') && read(hubHome, '.env').includes('APP_9ROUTER_API_KEY=sk-router-secret'));
+  const models = await api('GET', '/models');
+  check('the app does not give a key back', models.endpoints[0]?.hasKey === true && models.keys.find((k) => k.id === 'openrouter').saved && !JSON.stringify(models).includes('secret'));
+  check('an endpoint named like a built-in provider is turned down', !!(await api('POST', '/models/endpoints', { name: 'OpenRouter', baseUrl: 'http://localhost:1/v1' })).error);
+  check('so is a key that would add a line to the file', !!(await api('PUT', '/models/keys/openrouter', { key: 'k\nINJECTED=1' })).error && !read(hubHome, '.env').includes('INJECTED'));
+  await send('fourth steps=1');
+  await until('the fourth job to finish', async () => said(await rows(bot.id), 'Finished 1 steps.'));
+  check('a job on another machine carries them', read(laptopHome, '.env').includes('APP_9ROUTER_API_KEY=sk-router-secret') && read(laptopHome, 'config.yaml').includes('key_env: APP_9ROUTER_API_KEY'));
+  await api('DELETE', '/models/endpoints/9router');
+  check('taking one away leaves the rest', !read(hubHome, '.env').includes('APP_9ROUTER') && !read(hubHome, 'config.yaml').includes('9router') && read(hubHome, '.env').includes('MY_OWN=kept') && read(hubHome, '.env').includes('OPENROUTER_API_KEY=sk-or-secret'));
+
+  // A subscription is signed in to once, in a window on a bot's screen, and handed on to the agents.
+  check('only a known subscription can be signed in to', !!(await api('POST', '/models/sign-in', { provider: 'openrouter; reboot' })).error);
+  const signedIn = await api('POST', '/models/sign-in', { provider: 'openai-codex' });
+  if (signedIn.error) console.log(`skip  a sign-in from Settings (${signedIn.error})`); // this computer has no terminal program
+  else {
+    await until('the sign-in to reach the agent', async () => JSON.parse(read(hubHome, 'auth.json')).providers['openai-codex']?.token === 'signed-in', 30_000);
+    check('a sign-in from Settings reaches a bot’s agent', true);
+  }
 
   // Guessing closes pairing for a while, the open codes included.
   const openCode = await api('POST', '/pair/codes', {});

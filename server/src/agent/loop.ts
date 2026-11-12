@@ -8,6 +8,7 @@ import { appInfo as toolkitInfo } from '../apps.js';
 import { screenForWork } from '../computer.js';
 import { assignEngine, engineFor, engineKind, mcpToken, soulFor } from '../engine.js';
 import { readMemoryFiles, writeMemoryFiles } from '../engine-memory.js';
+import { accessFor } from '../modelAccess.js';
 import { createJob, getJob, markSeen, noteHubHistory, pruneJobs, setJob, unfinishedJobs, unseenDigest, type JobRow } from '../jobs.js';
 import { HUB, endRemote, machineRow, machinesChanged, nextChange, nextItem, place, pullRemote, startRemote, type MachineRow } from '../machines.js';
 import { instructionsFor } from './prompt.js';
@@ -395,7 +396,8 @@ async function* remoteTurn(job: JobRow, machine: MachineRow, request: Record<str
   const botId = job.bot_id;
   const run = startRemote(machine.id, {
     jobId: job.id, attempt: job.attempts, botId, botName: getBotRow(botId).name,
-    soul: soulFor(botId), mcp: { path: `/mcp/${botId}`, token: mcpToken(botId) }, memory: readMemoryFiles(botId), request,
+    soul: soulFor(botId), mcp: { path: `/mcp/${botId}`, token: mcpToken(botId) }, memory: readMemoryFiles(botId),
+    access: accessFor(getBotRow(botId).user_id), request,
   });
   try {
     for (;;) {

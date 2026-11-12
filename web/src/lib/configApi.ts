@@ -1,4 +1,4 @@
-import type { Bot, ComputerState, EngineInfo, JobInfo, LibraryFile, Machine, Memory, Routine, Skill, Task, Toolkit } from '@shared/types';
+import type { Bot, ComputerState, EngineInfo, JobInfo, LibraryFile, Machine, Memory, ModelAccessInfo, Routine, Skill, Task, Toolkit } from '@shared/types';
 import { ApiError } from './api';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -40,6 +40,9 @@ export type MachinePatch = Partial<Pick<Machine, 'name' | 'takes' | 'rank' | 'en
 export interface PairCode { id: string; code: string; expiresInMs: number; link: string; hubUrl: string }
 export interface PairStatus { state: 'open' | 'used' | 'expired'; expiresInMs: number; usedAs: 'machine' | 'browser' | null; deviceName: string | null }
 
+/** An endpoint as typed in Settings. With `id` it changes that endpoint, and an empty key keeps the one it has. */
+export interface EndpointDraft { id?: string; name: string; baseUrl: string; key: string; models: string }
+
 export const configApi = {
   settings: (botId: string) => req<BotSettingsBundle>('GET', `/bots/${botId}/settings`),
   updateBot: (botId: string, p: BotPatch) => req<{ bot: Bot }>('PATCH', `/bots/${botId}`, p),
@@ -72,11 +75,19 @@ export const configApi = {
 
   engine: (botId: string) => req<{ engine: EngineInfo }>('GET', `/bots/${botId}/engine`),
   setEngine: (botId: string, p: { provider?: string | null; model?: string | null }) => req<{ engine: EngineInfo }>('PATCH', `/bots/${botId}/engine`, p),
-  /** Opens the provider's sign-in flow in a terminal on the bot's screen. */
-  engineLogin: (botId: string, provider?: string) => req<{ ok: true }>('POST', `/bots/${botId}/engine/login`, provider ? { provider } : {}),
+  /** Opens the provider's sign-in in a terminal on the bot's screen, for this bot alone. */
+  engineLogin: (botId: string, provider: string) => req<{ ok: true }>('POST', `/bots/${botId}/engine/login`, { provider }),
   restartEngine: (botId: string) => req<{ engine: EngineInfo }>('POST', `/bots/${botId}/engine/restart`),
   /** Stops the private screen the agent runs for itself, so its computer work shows on the screen in the app. */
   stopOwnScreen: (botId: string) => req<{ engine: EngineInfo }>('POST', `/bots/${botId}/engine/screen/stop`),
+
+  models: () => req<ModelAccessInfo>('GET', '/models'),
+  saveModelKey: (provider: string, key: string) => req<ModelAccessInfo>('PUT', `/models/keys/${provider}`, { key }),
+  removeModelKey: (provider: string) => req<ModelAccessInfo>('DELETE', `/models/keys/${provider}`),
+  saveModelEndpoint: (e: EndpointDraft) => req<ModelAccessInfo>('POST', '/models/endpoints', e),
+  removeModelEndpoint: (id: string) => req<ModelAccessInfo>('DELETE', `/models/endpoints/${id}`),
+  /** Opens a subscription's sign-in on one Bot's screen, for every Bot. Says which Bot's screen. */
+  modelSignIn: (provider: string) => req<{ botId: string }>('POST', '/models/sign-in', { provider }),
 
   machines: () => req<MachinesBundle>('GET', '/machines'),
   /** A code for a new machine (named `name`, or after itself when that is empty), or for signing another browser in. */

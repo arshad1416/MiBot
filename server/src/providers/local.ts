@@ -21,7 +21,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const displayOf = (screenId: string) => (screenId === 'default' ? DEFAULT_DISPLAY : Number(screenId.replace('screen-', '')));
 const idOf = (display: number) => (display === DEFAULT_DISPLAY ? 'default' : `screen-${display}`);
 const socketOf = (display: number) => `/tmp/.X11-unix/X${display}`;
-const isUp = (display: number) => fs.existsSync(socketOf(display));
+
+/** A display is up when its socket is there and the X server that made it is alive: a killed one leaves its files behind. */
+function isUp(display: number): boolean {
+  if (!fs.existsSync(socketOf(display))) return false;
+  try {
+    process.kill(Number(fs.readFileSync(`/tmp/.X${display}-lock`, 'utf8').trim()), 0);
+    return true;
+  } catch (e: any) {
+    return e?.code === 'EPERM' || e?.code === 'ENOENT'; // someone else's server, or one that keeps no lock file
+  }
+}
 
 function size(): { width: number; height: number } {
   const m = /^(\d{3,5})x(\d{3,5})$/.exec(env.localScreenSize);

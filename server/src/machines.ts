@@ -1,5 +1,6 @@
 import os from 'node:os';
 import { db, now } from './db.js';
+import type { ModelAccess } from './gateway.js';
 import { newId, sha256, token } from './lib/ids.js';
 import { hub } from './lib/hub.js';
 import type { StreamEvent } from './lib/sse.js';
@@ -197,6 +198,8 @@ export interface JobSpec {
   soul: string;
   mcp: { path: string; token: string };
   memory: Record<string, string | null>;
+  /** Keys and endpoints the person added in Settings, for the agent's home on that machine. */
+  access: ModelAccess;
   /** Body for the agent's POST /v1/responses. */
   request: Record<string, unknown>;
 }

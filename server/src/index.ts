@@ -21,6 +21,7 @@ import { startIdleWatcher } from './idle.js';
 import { mcpApi } from './mcp.js';
 import { initEngines } from './engine.js';
 import { machinesApi, pairApi, workerApi } from './routes-machines.js';
+import { modelsApi } from './routes-models.js';
 
 if (!desSelfTest()) throw new Error('DES self-test failed');
 initSubagents();
@@ -38,6 +39,7 @@ app.route('/api/rooms', roomsApi);
 app.route('/api/worker', workerApi);
 // A device that is being added has no session either, only a one-time code.
 app.route('/api/pair', pairApi);
+app.route('/api/models', modelsApi);
 app.route('/api', api);
 app.route('/api', configApi);
 app.route('/api', machinesApi);

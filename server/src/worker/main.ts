@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { gatewayPid, healthy, homeKey, keyAccepted, readDotenv, spawnGateway, stopGateway, writeHermesHome } from '../gateway.js';
+import { gatewayPid, healthy, homeKey, keyAccepted, readDotenv, spawnGateway, stopGateway, writeHermesHome, writeModelAccess } from '../gateway.js';
 import { sseEvents, type StreamEvent } from '../lib/sse.js';
 import type { JobResult, JobSpec, WorkerInfo } from '../machines.js';
 import { pairWithHub, parsePairLink, waitForPairing } from './pairing.js';
@@ -197,6 +197,8 @@ async function startEngine(spec: JobSpec): Promise<{ url: string; key: string; h
   fs.mkdirSync(home, { recursive: true });
   writeMemory(home, spec.memory);
   fs.writeFileSync(path.join(home, 'SOUL.md'), spec.soul);
+  // A home that already exists takes changed keys at once: the agent reads them again for each turn.
+  if (spec.access && fs.existsSync(path.join(home, 'config.yaml'))) writeModelAccess(home, spec.access);
 
   if ((await healthy(url)) && homeKey(home) && (await keyAccepted(url, homeKey(home)))) return { url, key: homeKey(home), home };
   if (await healthy(url)) {
@@ -206,6 +208,7 @@ async function startEngine(spec: JobSpec): Promise<{ url: string; key: string; h
   const key = writeHermesHome({
     home, primaryHome: cfg.primaryHome, port: portFor(spec.botId), soul: spec.soul, cwd: path.join(home, 'workspace'),
     mcpServers: { hq: { url: `${hubUrl}${spec.mcp.path}`, headers: { Authorization: `Bearer ${spec.mcp.token}` }, timeout: 1800, connect_timeout: 30 } },
+    access: spec.access,
   });
   if (gatewayPid(home)) await stopGateway(home);
   await spawnGateway({ hermesBin: cfg.hermesBin, home, url });

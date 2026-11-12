@@ -240,6 +240,27 @@ export interface EngineProvider {
   models: string[];
 }
 
+/** An OpenAI-compatible endpoint of the person's own (9Router, OmniRoute, LiteLLM, Ollama…), added in Settings. */
+export interface ModelEndpoint {
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: string[];
+  hasKey: boolean;
+}
+
+/** Settings › Models: what the person's Bots can reach, and what can be added. */
+export interface ModelAccessInfo {
+  /** Providers a key can be added for. `saved`: a key was added here. `connected`: the Bots' agents can reach it (a key from here or one the computer already had). */
+  keys: { id: string; name: string; saved: boolean; connected: boolean }[];
+  subscriptions: { id: string; name: string; note: string; connected: boolean }[];
+  endpoints: ModelEndpoint[];
+  /** Why a subscription cannot be signed in to from here, or null. */
+  signInBlocked: string | null;
+  /** False while no agent has answered, so `connected` is not known yet. */
+  checked: boolean;
+}
+
 /** The Hermes agent that runs one bot. */
 export interface EngineInfo {
   botId: string;

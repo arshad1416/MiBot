@@ -161,7 +161,13 @@ The keys you need:
 
 ## Models and subscriptions
 
-Open a bot's details panel, **Engine**. Pick a provider and model there. **Sign in to a subscription** opens a terminal on the bot's screen running Hermes' own sign-in for that provider (for example Claude Pro/Max), so you finish it in the viewer and the bot uses that subscription from then on. Check your provider's terms before running an agent on a consumer subscription.
+**Settings › Models** is where your Bots get their models, once for all of them:
+
+- **Subscriptions.** **Sign in** opens Hermes' own sign-in for that provider (ChatGPT, Claude, Grok, Nous Portal) in a window on a Bot's screen and shows you that screen. When it is done, every Bot on the hub can use it. Check your provider's terms before running an agent on a consumer subscription.
+- **API keys.** Paste a provider's key. It is kept encrypted on the server and is never shown again.
+- **Your own endpoints.** Anything that speaks the OpenAI API, such as 9Router, OmniRoute, LiteLLM, Ollama or LM Studio: a name, an address, the model ids it serves and a key if it wants one.
+
+Keys and endpoints reach Bots on every machine from their next message. A sign-in stays on the machine it was made on. Which provider and model one Bot uses is chosen in its details panel, under **Engine**.
 
 ## Development
 
