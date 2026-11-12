@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { env } from './env.js';
-import { createSession, requireUser, type AuthVars } from './lib/auth.js';
+import { createSession, listDevices, removeDevice, requireUser, sessionToken, type AuthVars } from './lib/auth.js';
+import { describeDevice } from './lib/devices.js';
 import { moveJob, stopJob } from './agent/loop.js';
 import { getJob, openJobs } from './jobs.js';
 import { checkIn, createMachine, deleteMachine, listMachines, machineByToken, takeEvents, updateMachine, type MachineRow } from './machines.js';
@@ -8,18 +9,18 @@ import { createPairCode, PairError, pairStatus, redeemPairCode } from './pairing
 import { getBotRow } from './store.js';
 
 /**
- * Machines and the jobs waiting on them, for the app; the two calls a worker on another machine
+ * Machines, signed-in devices and the jobs waiting on machines, for the app; the two calls a worker on another machine
  * makes to this server; and pairing, which brings a new device in with a code. Mounted in index.ts.
  */
 
 // ---------- for the signed-in user ----------
 
 export const machinesApi = new Hono<AuthVars>();
-for (const p of ['/machines', '/machines/*', '/jobs/*']) machinesApi.use(p, requireUser);
+for (const p of ['/machines', '/machines/*', '/devices/*', '/jobs/*']) machinesApi.use(p, requireUser);
 
 machinesApi.get('/machines', (c) => {
   const userId = c.get('user').id;
-  return c.json({ machines: listMachines(userId), jobs: openJobs(userId) });
+  return c.json({ machines: listMachines(userId), jobs: openJobs(userId), devices: listDevices(userId, sessionToken(c)) });
 });
 
 machinesApi.post('/machines', async (c) => {
@@ -35,6 +36,9 @@ machinesApi.patch('/machines/:id', async (c) => {
 
 machinesApi.delete('/machines/:id', (c) =>
   deleteMachine(c.get('user').id, c.req.param('id')) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
+
+machinesApi.delete('/devices/:id', (c) =>
+  removeDevice(c.get('user').id, c.req.param('id')) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
 
 const ownJob = (userId: string, id: string) => {
   const job = getJob(id);
@@ -98,17 +102,6 @@ pairApi.get('/codes/:id', (c) => {
 /** A wrong, used or expired code is the caller's to fix; anything else is ours. */
 const pairFailure = (e: unknown) => (e instanceof PairError ? { error: e.message, status: 400 as const } : { error: 'Could not add this device.', status: 500 as const });
 
-/** What kind of device a browser is, for the line that says who used a code. */
-function deviceName(userAgent: string): string {
-  if (/^MiBot-Android/.test(userAgent)) return 'the MiBot app on an Android phone';
-  if (/iPhone/.test(userAgent)) return 'an iPhone';
-  if (/iPad/.test(userAgent)) return 'an iPad';
-  if (/Android/.test(userAgent)) return /Mobile/.test(userAgent) ? 'an Android phone' : 'an Android tablet';
-  if (/Macintosh/.test(userAgent)) return 'a Mac';
-  if (/Windows/.test(userAgent)) return 'a Windows PC';
-  return 'another browser';
-}
-
 // A worker with no settings yet: it becomes one of the code owner's machines and gets its token.
 pairApi.post('/machine', async (c) => {
   const p = await c.req.json<{ code?: string; name?: string }>().catch(() => ({} as { code?: string; name?: string }));
@@ -128,7 +121,7 @@ pairApi.post('/machine', async (c) => {
 pairApi.post('/sign-in', async (c) => {
   const p = await c.req.json<{ code?: string }>().catch(() => ({} as { code?: string }));
   try {
-    const made = redeemPairCode(p.code ?? '', 'browser', (code) => ({ name: deviceName(c.req.header('user-agent') ?? ''), userId: code.userId }));
+    const made = redeemPairCode(p.code ?? '', 'browser', (code) => ({ name: describeDevice(c.req.header('user-agent') ?? '').phrase, userId: code.userId }));
     createSession(c, made.userId);
     return c.json({ ok: true });
   } catch (e) {

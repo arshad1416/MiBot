@@ -181,6 +181,19 @@ export interface Skill { id: string; botId: string; name: string; description: s
 
 export type JobWeight = 'light' | 'heavy';
 
+/** A phone, tablet or browser that is signed in. It runs no jobs. */
+export interface Device {
+  id: string;
+  /** What it said it is, such as "iPhone · Safari". */
+  name: string;
+  kind: 'phone' | 'tablet' | 'computer';
+  signedInAt: number;
+  /** Null for a sign-in that has not been used since devices were first listed. */
+  lastUsedAt: number | null;
+  /** The device that asked. */
+  current: boolean;
+}
+
 /** A machine that can run bots' jobs: the hub (where this server runs) or another one running the worker. */
 export interface Machine {
   id: string;

@@ -5,7 +5,7 @@ import { db, now } from './db.js';
 import { env } from './env.js';
 import { newId } from './lib/ids.js';
 import { hub } from './lib/hub.js';
-import { createSession, destroySession, isOwnerKey, requireUser, userFromCookieHeader, type AuthVars } from './lib/auth.js';
+import { createSession, destroySession, isOwnerKey, requireUser, sessionToken, userFromCookieHeader, userFromToken, type AuthVars } from './lib/auth.js';
 import { allLive, appendRow, clearConversation, emitBot, getBot, getBotRow, getRow, listBots, listRoutines, listRows, listTasks, toRoutine, updateRow } from './store.js';
 import { enqueue, interrupt, resolveApproval } from './agent/loop.js';
 import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen, suspendComputer } from './computer.js';
@@ -157,6 +157,7 @@ api.use('/*', async (c, next) => {
 
 api.get('/events', (c) => {
   const user = c.get('user');
+  const session = sessionToken(c);
   return streamSSE(c, async (stream) => {
     const queue: string[] = [];
     let wake: (() => void) | null = null;
@@ -167,6 +168,8 @@ api.get('/events', (c) => {
       if (!queue.length) {
         await Promise.race([new Promise<void>((r) => (wake = r)), new Promise((r) => setTimeout(r, 20_000))]);
         wake = null;
+        // A device signed out from Settings gets nothing more.
+        if (!userFromToken(session)) break;
         if (!queue.length) { await stream.writeSSE({ data: JSON.stringify({ type: 'ping' }) }); continue; }
       }
       while (queue.length) await stream.writeSSE({ data: queue.shift()! });

@@ -177,6 +177,19 @@ try {
   const me = await (await fetch(`${HUB}/api/auth/me`, { headers: { cookie: phoneCookie } })).json();
   check('a phone signs in with a code', signIn.ok && me.user?.email === 'test@example.com' && (await api('GET', `/pair/codes/${phoneCode.id}`)).deviceName === 'an iPhone');
 
+  // It is listed with the other signed-in devices, and signing it out there ends its sign-in and its live events.
+  const devices = (await api('GET', '/machines')).devices;
+  const phone = devices.find((d) => d.name === 'iPhone');
+  check('a signed-in phone is listed, after the device that asked', devices[0].current && phone?.kind === 'phone' && !phone.current && !JSON.stringify(devices).includes(phoneCookie.split('=')[1]));
+  const live = await fetch(`${HUB}/api/events`, { headers: { cookie: phoneCookie } });
+  const signedOut = await api('DELETE', `/devices/${phone.id}`);
+  const after = await fetch(`${HUB}/api/auth/me`, { headers: { cookie: phoneCookie } });
+  let closed = false;
+  const reader = live.body.getReader();
+  await until('the phone’s live events to end', async () => { closed ||= (await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r({}), 200))])).done === true; return closed; });
+  check('signing a device out ends its sign-in', signedOut.ok && (await after.json()).user == null && !(await api('GET', '/machines')).devices.some((d) => d.id === phone.id));
+  check('nobody can sign out a device that is not theirs', (await api('DELETE', '/devices/dev_nope')).error === 'not found');
+
   // A new bot's agent can take minutes to start; its model list is there meanwhile, from the agent that is up.
   fs.writeFileSync(slowStart, '');
   const { bot: newcomer } = await api('POST', '/bots', { name: 'Newcomer' });

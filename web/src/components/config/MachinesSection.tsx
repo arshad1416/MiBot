@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { JobInfo, Machine } from '@shared/types';
+import type { Device, JobInfo, Machine } from '@shared/types';
 import { configApi, type MachinePatch, type MachinesBundle, type PairCode, type PairStatus } from '../../lib/configApi';
 import { SETUP_PAGE, setupPageLink } from '../../lib/pairing';
 import { relativeShort } from '../../lib/time';
@@ -16,11 +16,23 @@ const TAKES: { value: Machine['takes']; label: string }[] = [
 
 const gb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
+/** "5m ago", "now", "yesterday": how long since, for the middle of a line. */
+function ago(ts: number): string {
+  const short = relativeShort(ts);
+  return /^\d/.test(short) ? `${short} ago` : short.toLowerCase();
+}
+
+/** One line under a device's name: when it came in and when it last asked for something. */
+function deviceLine(d: Device): string {
+  const used = d.current ? 'in use now' : d.lastUsedAt ? `last used ${ago(d.lastUsedAt)}` : 'not used lately';
+  return `Signed in ${ago(d.signedInAt)} · ${used}`;
+}
+
 /** One line under a machine's name: is it there, and what is it doing. */
 function machineLine(m: Machine): string {
   if (!m.enabled) return 'Switched off. It gets no jobs.';
   if (m.state === 'never') return 'Not connected yet. Start the worker on it to bring it in.';
-  if (m.state === 'away') return `Asleep or offline${m.lastSeenAt ? ` · last seen ${relativeShort(m.lastSeenAt)}${/^\d/.test(relativeShort(m.lastSeenAt)) ? ' ago' : ''}` : ''}`;
+  if (m.state === 'away') return `Asleep or offline${m.lastSeenAt ? ` · last seen ${ago(m.lastSeenAt)}` : ''}`;
   const parts = [m.state === 'busy' ? `Not taking jobs${m.reason ? `: ${m.reason}` : ''}` : 'Online'];
   if (m.running) parts.push(`${m.running} job${m.running === 1 ? '' : 's'} running`);
   if (m.memFreeMb !== null) parts.push(`${gb(m.memFreeMb)} free`);
@@ -173,6 +185,25 @@ export function MachinesSection() {
             <div className="cfg-field__hint">Add shows a QR code and a short code. Use it on a computer to have it run jobs, or on a phone to sign in there. The name and job sizes are for a computer; without a name it is called after itself.</div>
           </>
         )}
+      </section>
+
+      <section className="cfg-section">
+        <div className="cfg-section__label">Phones and browsers</div>
+        <div className="cfg-card">
+          {!data ? <div className="cfg-empty cfg-empty--flat">Loading…</div> : data.devices.map((d) => (
+            <div key={d.id} className="cfg-row machine-row">
+              <Icon name={d.kind === 'computer' ? 'monitor' : 'phone'} size={16} opacity={0.6} />
+              <div className="cfg-row__text">
+                <div className="cfg-row__title">{d.name}{d.current && <span className="cfg-chip cfg-chip--muted machine-row__chip">This device</span>}</div>
+                <div className="cfg-row__sub">{deviceLine(d)}</div>
+              </div>
+              {!d.current && (
+                <ConfirmButton confirmLabel="Sign out" onConfirm={() => run(() => configApi.removeDevice(d.id))} title="Sign this device out. It needs a new code to come back.">Sign out</ConfirmButton>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="cfg-field__hint">Everything signed in to your MiBot that does not run jobs. Sign out a phone you have lost and it can no longer open your Bots.</div>
       </section>
 
       <section className="cfg-section">
