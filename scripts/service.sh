@@ -50,6 +50,22 @@ if [ "$role" = hub ]; then (cd "$repo" && npm run build >/dev/null); else (cd "$
 mkdir -p "$HOME/.mibot"
 log="$HOME/.mibot/$role.log"
 
+# The hub takes a moment to open its port. Wait for it, so that whatever is run next (a sign-in
+# link, say) finds it there.
+started() {
+  if [ "$role" = hub ]; then
+    val() { { grep -E "^$1=" "$settings" || true; } | tail -1 | cut -d= -f2-; }
+    host="$(val HOST)"; port="$(val PORT)"
+    up=""
+    for _ in $(seq 1 60); do
+      if curl -fsS -o /dev/null --max-time 2 "http://${host:-127.0.0.1}:${port:-8787}/api/health" 2>/dev/null; then up=1; break; fi
+      sleep 1
+    done
+    [ -n "$up" ] || { echo "$name was started but did not answer within a minute. See $log"; exit 1; }
+  fi
+  echo "$name is running. Log: $log"
+}
+
 if [ "$os" = Darwin ]; then
   mkdir -p "$(dirname "$plist")"
   args=""; for a in "$node" "${run_args[@]}"; do args="$args    <string>$a</string>"$'\n'; done
@@ -77,7 +93,7 @@ $args  </array>
 PLIST
   launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$plist"
-  echo "$name is running. Log: $log"
+  started
 else
   mkdir -p "$(dirname "$unit")"
   cat > "$unit" <<UNIT
@@ -102,7 +118,7 @@ UNIT
   systemctl --user daemon-reload
   systemctl --user enable "$name" >/dev/null
   systemctl --user restart "$name"
-  echo "$name is running. Log: $log"
+  started
   me="$(id -un)"
   if [ "$(loginctl show-user "$me" -p Linger --value 2>/dev/null)" != yes ]; then
     echo "To keep it running while you are logged out, run this once:  sudo loginctl enable-linger $me"
