@@ -5,6 +5,7 @@ import { ChatView } from './components/ChatView';
 import { ComputerViewer } from './components/ComputerViewer';
 import { DetailsPanel } from './components/DetailsPanel';
 import { Sidebar } from './components/Sidebar';
+import { PairPage } from './components/PairPage';
 import { SignIn } from './components/SignIn';
 import { ConnectAppsModal } from './components/modals/ConnectAppsModal';
 import { CreateBotModal } from './components/modals/CreateBotModal';
@@ -74,5 +75,7 @@ export function App() {
   const user = useStore((s) => s.user);
   useEffect(() => { useStore.getState().checkAuth(); }, []);
   if (!authChecked) return <div className="boot" />;
+  // The link in a pairing QR code, for a device that is being added.
+  if (location.pathname === '/pair') return <PairPage />;
   return user ? <Shell /> : <SignIn />;
 }

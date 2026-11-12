@@ -228,9 +228,15 @@
 .machine-add { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .machine-add input.text-input { width: auto; flex: 1 1 180px; min-width: 0; height: 32px; }
 select.text-input.machine-move { width: auto; max-width: 150px; height: 30px; padding: 0 8px; flex: 0 0 auto; }
-.machine-new { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); }
-.machine-new__title { font-size: 13px; font-weight: 500; line-height: 18px; color: var(--color-text-primary); }
-.machine-new__steps { margin: 0; padding-left: 18px; font-size: 13px; line-height: 20px; color: var(--color-text-secondary); }
-.machine-new__env { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--color-bg-tertiary); font-family: var(--font-mono-stack); font-size: 12px; line-height: 18px; color: var(--color-text-primary); overflow-x: auto; user-select: all; }
-.machine-new__actions { display: flex; justify-content: flex-end; gap: 8px; }
-.machine-new__actions .cfg-btn { display: inline-flex; align-items: center; gap: 6px; }
+/* The one-time code that adds a device: QR code on the left, the letters and what to do with them on the right. */
+.pair-card { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; padding: 16px; border-radius: 12px; background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); }
+.pair-card--closed { align-items: center; justify-content: space-between; }
+.pair-card .qr { flex-shrink: 0; border-radius: 8px; }
+.pair-card__body { display: flex; flex-direction: column; gap: 6px; flex: 1 1 260px; min-width: 0; }
+.pair-card__title { font-size: 13px; font-weight: 500; line-height: 18px; color: var(--color-text-primary); }
+.pair-card__code { font-family: var(--font-mono-stack); font-size: 28px; font-weight: 600; line-height: 34px; letter-spacing: 2px; color: var(--color-text-primary); user-select: all; }
+.pair-card__meta { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
+.pair-card__steps { margin: 4px 0; padding-left: 18px; font-size: 13px; line-height: 20px; color: var(--color-text-secondary); }
+.pair-card__steps b { font-weight: 500; color: var(--color-text-primary); }
+.pair-card__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.pair-card__actions .cfg-btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }

@@ -1,14 +1,15 @@
 import { Hono } from 'hono';
 import { env } from './env.js';
-import { requireUser, type AuthVars } from './lib/auth.js';
+import { createSession, requireUser, type AuthVars } from './lib/auth.js';
 import { moveJob, stopJob } from './agent/loop.js';
 import { getJob, openJobs } from './jobs.js';
 import { checkIn, createMachine, deleteMachine, listMachines, machineByToken, takeEvents, updateMachine, type MachineRow } from './machines.js';
+import { createPairCode, PairError, pairStatus, redeemPairCode } from './pairing.js';
 import { getBotRow } from './store.js';
 
 /**
- * Machines and the jobs waiting on them, for the app; and the two calls a worker on another machine
- * makes to this server. Mounted in index.ts.
+ * Machines and the jobs waiting on them, for the app; the two calls a worker on another machine
+ * makes to this server; and pairing, which brings a new device in with a code. Mounted in index.ts.
  */
 
 // ---------- for the signed-in user ----------
@@ -18,7 +19,7 @@ for (const p of ['/machines', '/machines/*', '/jobs/*']) machinesApi.use(p, requ
 
 machinesApi.get('/machines', (c) => {
   const userId = c.get('user').id;
-  return c.json({ machines: listMachines(userId), jobs: openJobs(userId), hubUrl: env.serverUrl });
+  return c.json({ machines: listMachines(userId), jobs: openJobs(userId) });
 });
 
 machinesApi.post('/machines', async (c) => {
@@ -75,4 +76,62 @@ workerApi.post('/jobs/:id/events', async (c) => {
   const p = await c.req.json<{ attempt: number; from: number; events?: any[]; done?: any }>();
   const next = takeEvents(c.get('machine'), c.req.param('id'), Number(p.attempt), Number(p.from) || 0, Array.isArray(p.events) ? p.events : [], p.done);
   return next === null ? c.json({ error: 'gone' }, 410) : c.json({ next });
+});
+
+// ---------- pairing: a new device hands in a code ----------
+
+export const pairApi = new Hono<AuthVars>();
+for (const p of ['/codes', '/codes/*']) pairApi.use(p, requireUser);
+
+pairApi.post('/codes', async (c) => {
+  const p = await c.req.json<{ name?: string; takes?: string }>().catch(() => ({} as { name?: string; takes?: string }));
+  const made = createPairCode(c.get('user').id, p.name ?? '', p.takes ?? 'both');
+  // The code rides in the link's fragment, which browsers keep to themselves.
+  return c.json({ ...made, link: `${env.appUrl}/pair#${made.code}`, hubUrl: env.serverUrl });
+});
+
+pairApi.get('/codes/:id', (c) => {
+  const status = pairStatus(c.get('user').id, c.req.param('id'));
+  return status ? c.json(status) : c.json({ error: 'not found' }, 404);
+});
+
+/** A wrong, used or expired code is the caller's to fix; anything else is ours. */
+const pairFailure = (e: unknown) => (e instanceof PairError ? { error: e.message, status: 400 as const } : { error: 'Could not add this device.', status: 500 as const });
+
+/** What kind of device a browser is, for the line that says who used a code. */
+function deviceName(userAgent: string): string {
+  if (/iPhone/.test(userAgent)) return 'an iPhone';
+  if (/iPad/.test(userAgent)) return 'an iPad';
+  if (/Android/.test(userAgent)) return /Mobile/.test(userAgent) ? 'an Android phone' : 'an Android tablet';
+  if (/Macintosh/.test(userAgent)) return 'a Mac';
+  if (/Windows/.test(userAgent)) return 'a Windows PC';
+  return 'another browser';
+}
+
+// A worker with no settings yet: it becomes one of the code owner's machines and gets its token.
+pairApi.post('/machine', async (c) => {
+  const p = await c.req.json<{ code?: string; name?: string }>().catch(() => ({} as { code?: string; name?: string }));
+  try {
+    const made = redeemPairCode(p.code ?? '', 'machine', (code) => {
+      const { machine, token } = createMachine(code.userId, code.name || p.name?.trim() || 'Machine', code.takes);
+      return { name: machine.name, token };
+    });
+    return c.json(made);
+  } catch (e) {
+    const f = pairFailure(e);
+    return c.json({ error: f.error }, f.status);
+  }
+});
+
+// A phone or another browser: it is signed in as the code's owner.
+pairApi.post('/sign-in', async (c) => {
+  const p = await c.req.json<{ code?: string }>().catch(() => ({} as { code?: string }));
+  try {
+    const made = redeemPairCode(p.code ?? '', 'browser', (code) => ({ name: deviceName(c.req.header('user-agent') ?? ''), userId: code.userId }));
+    createSession(c, made.userId);
+    return c.json({ ok: true });
+  } catch (e) {
+    const f = pairFailure(e);
+    return c.json({ error: f.error }, f.status);
+  }
 });

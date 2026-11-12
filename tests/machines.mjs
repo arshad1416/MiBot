@@ -2,9 +2,11 @@
 //
 //   node tests/machines.mjs
 //
-// It checks that a heavy job goes to the worker, that a job is paused when the worker "sleeps"
-// (SIGSTOP) and carries on when it wakes, and that a job whose worker died is started again with a
-// note of what was already done. Needs nothing but `npm ci`; takes about a minute.
+// It checks that a machine is added with a one-time code (from the command line and from the page a
+// worker serves), that a heavy job goes to the worker, that a job is paused when the worker "sleeps"
+// (SIGSTOP) and carries on when it wakes, that a job whose worker died is started again with a
+// note of what was already done, and that a new bot's model can be chosen while its agent is still
+// starting. Needs nothing but `npm ci`; takes about a minute.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,6 +24,7 @@ const screensBefore = new Set(screens());
 
 // ---------- a stand-in for `hermes gateway run` ----------
 // Each "tool call" takes `delay` ms; the last "steps=N delay=M" in the input sets the pace.
+// While the file `slow-start` exists, a gateway that is starting does not answer yet.
 fs.writeFileSync(path.join(dir, 'stub-hermes.mjs'), `
 import http from 'node:http';
 import fs from 'node:fs';
@@ -30,9 +33,11 @@ const home = process.env.HERMES_HOME;
 const env = Object.fromEntries(fs.readFileSync(path.join(home, '.env'), 'utf8').split('\\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
 fs.writeFileSync(path.join(home, 'gateway.pid'), JSON.stringify({ pid: process.pid, hermes_home: home }));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+while (fs.existsSync(${JSON.stringify(path.join(dir, 'slow-start'))})) await sleep(200);
 http.createServer(async (req, res) => {
   if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok', version: 'stub' }));
   if (req.headers.authorization !== 'Bearer ' + env.API_SERVER_KEY) { res.statusCode = 401; return res.end('{}'); }
+  if (req.url === '/api/model/options') return res.end(JSON.stringify({ provider: 'openai-codex', model: 'stub-large', providers: [{ slug: 'openai-codex', name: 'ChatGPT', auth_type: 'oauth', authenticated: true, featured_models: ['stub-large', 'stub-small'] }] }));
   if (req.url !== '/v1/responses') return res.end('{"data":[]}');
   let raw = '';
   for await (const c of req) raw += c;
@@ -111,7 +116,14 @@ try {
 
   // The hub takes light jobs only, so the heavy bot's jobs need the other machine.
   await api('PATCH', '/machines/hub', { takes: 'light' });
-  const added = await api('POST', '/machines', { name: 'Laptop', takes: 'both' });
+  // The laptop joins with a one-time code, handed in from its command line.
+  const laptopEnv = path.join(dir, 'laptop.env');
+  const code = await api('POST', '/pair/codes', { name: 'Laptop', takes: 'both' });
+  const paired = spawnSync(tsx, ['src/worker/main.ts', 'pair', code.link], { cwd: path.join(repo, 'server'), env: { ...process.env, MIBOT_WORKER_ENV: laptopEnv }, encoding: 'utf8' });
+  check('a machine joins with the link from the app', paired.status === 0 && /^WORKER_TOKEN=.+/m.test(fs.readFileSync(laptopEnv, 'utf8')) && (await api('GET', `/pair/codes/${code.id}`)).deviceName === 'Laptop');
+  check('its settings are readable by its user only', (fs.statSync(laptopEnv).mode & 0o777) === 0o600);
+  const again = await fetch(`${HUB}/api/pair/machine`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code.code }) });
+  check('a code works once', again.status === 400);
   const send = (text) => api('POST', `/bots/${bot.id}/messages`, { text });
   const jobs = async () => (await api('GET', '/machines')).jobs;
 
@@ -119,7 +131,7 @@ try {
   await until('the job to wait for the laptop', async () => (await jobs())[0]?.note?.includes('Waiting for Laptop'));
   check('a heavy job waits while no machine that takes it is awake', true);
 
-  const workerEnv = { MIBOT_WORKER_ENV: path.join(dir, 'none.env'), HUB_URL: HUB, WORKER_TOKEN: added.token, WORKER_DIR: path.join(dir, 'laptop'), HERMES_BIN: hermes, HERMES_HOME_PRIMARY: path.join(dir, 'laptop-hermes'), WORKER_PORT_BASE: '18850' };
+  const workerEnv = { MIBOT_WORKER_ENV: laptopEnv, WORKER_DIR: path.join(dir, 'laptop'), HERMES_BIN: hermes, HERMES_HOME_PRIMARY: path.join(dir, 'laptop-hermes'), WORKER_PORT_BASE: '18850' };
   let worker = start('worker', tsx, ['src/worker/main.ts'], workerEnv);
   await until('the first job to finish on the laptop', async () => said(await rows(bot.id), 'Finished 2 steps.'));
   check('it runs as soon as the machine checks in', true);
@@ -150,13 +162,52 @@ try {
   check('a job whose worker died is started again', lastInput.includes('was interrupted before it finished'));
   check('with the steps already taken', lastInput.includes('You used') && lastInput.includes('echo step 1'));
   check('no job is left open', (await jobs()).length === 0);
+
+  // A second machine joins from the page its worker serves while it has no settings.
+  const page = 'http://127.0.0.1:18795';
+  start('desk', tsx, ['src/worker/main.ts'], { MIBOT_WORKER_ENV: path.join(dir, 'desk.env'), WORKER_PAIR_PORT: '18795', WORKER_DIR: path.join(dir, 'desk'), HERMES_BIN: hermes, WORKER_PORT_BASE: '18870' });
+  await until('the setup page', async () => (await fetch(page)).ok);
+  const hand = (body, origin = page) => fetch(`${page}/pair`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify(body) });
+  const deskCode = await api('POST', '/pair/codes', { name: '', takes: 'light' });
+  check('another site cannot point a worker at a hub', (await hand({ hub: HUB, code: deskCode.code }, 'https://elsewhere.example')).status === 403);
+  check('a wrong code is turned down', (await hand({ hub: HUB, code: 'AAAA-AAAA' })).status === 400);
+  const joined = await hand({ hub: HUB, code: deskCode.code.toLowerCase() });
+  const desk = async () => (await api('GET', '/machines')).machines.find((m) => m.name === os.hostname().replace(/\.local$/, ''));
+  check('a machine joins with the code typed on its own page', joined.status === 200 && (await desk())?.takes === 'light');
+  await until('the new machine to come online', async () => (await desk())?.state === 'online');
+  check('and starts working without being restarted', true);
+
+  // The same kind of code signs another browser in.
+  const phoneCode = await api('POST', '/pair/codes', {});
+  const signIn = await fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'Mozilla/5.0 (iPhone)' }, body: JSON.stringify({ code: phoneCode.code }) });
+  const phoneCookie = (signIn.headers.get('set-cookie') ?? '').split(';')[0];
+  const me = await (await fetch(`${HUB}/api/auth/me`, { headers: { cookie: phoneCookie } })).json();
+  check('a phone signs in with a code', signIn.ok && me.user?.email === 'test@example.com' && (await api('GET', `/pair/codes/${phoneCode.id}`)).deviceName === 'an iPhone');
+
+  // A new bot's agent can take minutes to start; its model list is there meanwhile, from the agent that is up.
+  const slowStart = path.join(dir, 'slow-start');
+  fs.writeFileSync(slowStart, '');
+  const { bot: newcomer } = await api('POST', '/bots', { name: 'Newcomer' });
+  const engine = async () => (await api('GET', `/bots/${newcomer.id}/engine`)).engine;
+  const early = await engine();
+  check('a new bot has its model list while its agent starts', early.status === 'starting' && early.providers[0]?.models.includes('stub-small'));
+  await api('PATCH', `/bots/${newcomer.id}/engine`, { provider: 'openai-codex', model: 'stub-small' });
+  fs.rmSync(slowStart);
+  const ready = await until('the new agent to start', async () => { const e = await engine(); return e.status === 'ready' && e; });
+  check('and keeps the model chosen meanwhile', ready.model === 'stub-small' && ready.providers.length === 1);
+
+  // Guessing closes pairing for a while, the open codes included.
+  const openCode = await api('POST', '/pair/codes', {});
+  const guess = (code) => fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  for (let i = 0; i < 10; i++) await guess('ZZZZZZZ' + (i % 8 + 2));
+  check('too many wrong codes close pairing', (await guess(openCode.code)).status === 400 && (await api('GET', `/pair/codes/${openCode.id}`)).state === 'expired');
 } catch (e) {
   console.error(`FAIL  ${e.message}`);
   failed = true;
 } finally {
   for (const c of children) stopGroup(c);
   // The agents were started detached by the hub and the worker: stop them by their pid files.
-  for (const engines of [path.join(dir, 'hub-engines'), path.join(dir, 'laptop', 'engines')]) {
+  for (const engines of [path.join(dir, 'hub-engines'), path.join(dir, 'laptop', 'engines')]) { // the desk never ran a job
     for (const id of fs.existsSync(engines) ? fs.readdirSync(engines) : []) {
       try { process.kill(JSON.parse(fs.readFileSync(path.join(engines, id, 'gateway.pid'), 'utf8')).pid, 'SIGKILL'); } catch { /* not running */ }
     }

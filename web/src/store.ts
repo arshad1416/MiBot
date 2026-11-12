@@ -173,7 +173,8 @@ export const useStore = create<State>((set, get) => ({
         return;
       case 'tasks':
       case 'memories':
-        // Picked up by configStore.ts (Tasks view, Library/Tasks tabs, bot settings).
+      case 'machines':
+        // Picked up by configStore.ts (Tasks view, Library/Tasks tabs, bot settings, Settings › Machines).
         window.dispatchEvent(new CustomEvent('grokbot:event', { detail: ev }));
         return;
       case 'connections':

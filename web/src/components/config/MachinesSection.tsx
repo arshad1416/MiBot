@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { JobInfo, Machine } from '@shared/types';
-import { configApi, type MachinePatch, type MachinesBundle } from '../../lib/configApi';
+import { configApi, type MachinePatch, type MachinesBundle, type PairCode, type PairStatus } from '../../lib/configApi';
+import { SETUP_PAGE, setupPageLink } from '../../lib/pairing';
 import { relativeShort } from '../../lib/time';
 import { useVersion } from '../../configStore';
 import { Icon } from '../Icon';
+import { QrCode } from '../QrCode';
 import { ConfirmButton, PageHead, Segmented, Switch } from './ui';
 
 const TAKES: { value: Machine['takes']; label: string }[] = [
@@ -27,25 +29,69 @@ function machineLine(m: Machine): string {
 
 const JOB_STATUS: Record<JobInfo['status'], string> = { queued: 'In line', waiting: 'Waiting', running: 'Running', paused: 'Paused' };
 
-/** Settings for a worker that was just added. The token is only ever shown here. */
-function NewMachineCard({ name, hubUrl, token, onDone }: { name: string; hubUrl: string; token: string; onDone: () => void }) {
+const spaced = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
+const clock = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+
+/** A one-time code for a new device, as a QR code and as letters, until it is used or runs out. */
+function PairCard({ pair, version, onUsed, onAgain, onDone }: { pair: PairCode; version: number; onUsed: () => void; onAgain: () => void; onDone: () => void }) {
+  const [status, setStatus] = useState<PairStatus>({ state: 'open', expiresInMs: pair.expiresInMs, usedAs: null, deviceName: null });
+  const [left, setLeft] = useState(pair.expiresInMs);
   const [copied, setCopied] = useState(false);
-  const text = `HUB_URL=${hubUrl}\nWORKER_TOKEN=${token}\n`;
-  const copy = async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* select and copy by hand */ } };
+  const open = status.state === 'open';
+
+  // Ask when something changed on the server, and every few seconds in case that word was missed.
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const ask = () => configApi.pairStatus(pair.id).then((s) => {
+      if (!alive) return;
+      setStatus(s);
+      setLeft(s.expiresInMs);
+      if (s.state === 'used') onUsed();
+    }).catch(() => {});
+    ask();
+    const poll = setInterval(ask, 4000);
+    return () => { alive = false; clearInterval(poll); };
+  }, [pair.id, open, version, onUsed]);
+  useEffect(() => {
+    if (!open) return;
+    const tick = setInterval(() => setLeft((ms) => Math.max(0, ms - 1000)), 1000);
+    return () => clearInterval(tick);
+  }, [open]);
+
+  const copy = async () => { try { await navigator.clipboard.writeText(pair.link); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* select and copy by hand */ } };
+
+  if (!open || left <= 0) {
+    const used = status.state === 'used';
+    return (
+      <div className="pair-card pair-card--closed" role="status">
+        <div className="pair-card__title">
+          {used ? (status.usedAs === 'machine' ? `${status.deviceName} is connected. It is in the list above.` : `Signed in on ${status.deviceName}.`) : 'That code ran out before it was used.'}
+        </div>
+        <div className="pair-card__actions">
+          <button type="button" className="cfg-btn cfg-btn--secondary" onClick={onAgain}>{used ? 'Add another' : 'Make a new code'}</button>
+          <button type="button" className="cfg-btn cfg-btn--primary" onClick={onDone}>Done</button>
+        </div>
+      </div>
+    );
+  }
+
+  const hub = pair.hubUrl.replace(/^https?:\/\//, '');
   return (
-    <div className="machine-new" role="status">
-      <div className="machine-new__title">Finish on {name}</div>
-      <ol className="machine-new__steps">
-        <li>Put the MiBot folder on that machine and run <code className="cfg-code">npm ci</code> in it.</li>
-        <li>Save these two lines there as <code className="cfg-code">~/.mibot/worker.env</code>. The token is shown only this once.</li>
-      </ol>
-      <pre className="machine-new__env">{text}</pre>
-      <ol className="machine-new__steps" start={3}>
-        <li>Run <code className="cfg-code">npm run worker</code> in the MiBot folder. The machine shows as online here within a few seconds.</li>
-      </ol>
-      <div className="machine-new__actions">
-        <button type="button" className="cfg-btn cfg-btn--secondary" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} opacity={0.7} /> {copied ? 'Copied' : 'Copy the two lines'}</button>
-        <button type="button" className="cfg-btn cfg-btn--primary" onClick={onDone}>Done</button>
+    <div className="pair-card" role="status">
+      <QrCode text={pair.link} size={168} label="QR code that adds a device" />
+      <div className="pair-card__body">
+        <div className="pair-card__code" aria-label={`Code ${pair.code.split('').join(' ')}`}>{spaced(pair.code)}</div>
+        <div className="pair-card__meta">Works once, for the next {clock(left)}</div>
+        <ul className="pair-card__steps">
+          <li><b>A computer that should run jobs:</b> open <code className="cfg-code">{SETUP_PAGE}</code> on it and type the code. Its hub address is <code className="cfg-code">{hub}</code>.</li>
+          <li><b>A phone or another browser:</b> scan the QR code to sign in there.</li>
+        </ul>
+        <div className="pair-card__actions">
+          <a className="cfg-btn cfg-btn--secondary" href={setupPageLink(pair.hubUrl, pair.code)} target="_blank" rel="noreferrer" title="Opens this computer’s own setup page with the code filled in. Its worker has to be running.">Add this computer</a>
+          <button type="button" className="cfg-btn cfg-btn--secondary" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} opacity={0.7} /> {copied ? 'Copied' : 'Copy link'}</button>
+          <button type="button" className="cfg-btn cfg-btn--primary" onClick={onDone}>Done</button>
+        </div>
       </div>
     </div>
   );
@@ -58,7 +104,7 @@ export function MachinesSection() {
   const [name, setName] = useState('');
   const [takes, setTakes] = useState<Machine['takes']>('both');
   const [adding, setAdding] = useState(false);
-  const [added, setAdded] = useState<{ name: string; token: string } | null>(null);
+  const [pair, setPair] = useState<PairCode | null>(null);
   const load = useCallback(() => { configApi.machines().then(setData).catch((e) => setNote((e as Error).message)); }, []);
   useEffect(() => { load(); }, [load, version]);
 
@@ -76,11 +122,9 @@ export function MachinesSection() {
     await Promise.all(order.map((m, rank) => (m.rank === rank ? null : configApi.updateMachine(m.id, { rank }))));
   });
   const add = async () => {
-    if (!name.trim()) return;
     setAdding(true);
     await run(async () => {
-      const r = await configApi.addMachine(name.trim(), takes);
-      setAdded({ name: r.machine.name, token: r.token });
+      setPair(await configApi.pairCode(name.trim(), takes));
       setName('');
     });
     setAdding(false);
@@ -118,13 +162,16 @@ export function MachinesSection() {
       </section>
 
       <section className="cfg-section">
-        <div className="cfg-section__label">Add a machine</div>
-        {added && data ? <NewMachineCard name={added.name} hubUrl={data.hubUrl} token={added.token} onDone={() => setAdded(null)} /> : (
-          <div className="machine-add">
-            <input className="text-input" value={name} maxLength={60} placeholder="Name, like MacBook" aria-label="Machine name" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void add(); }} />
-            <Segmented label="Jobs it takes" value={takes} options={TAKES} onChange={setTakes} />
-            <button type="button" className="cfg-btn cfg-btn--primary" disabled={!name.trim() || adding} onClick={add}>{adding ? 'Adding…' : 'Add'}</button>
-          </div>
+        <div className="cfg-section__label">Add a device</div>
+        {pair ? <PairCard key={pair.id} pair={pair} version={version} onUsed={load} onAgain={() => { setPair(null); void add(); }} onDone={() => setPair(null)} /> : (
+          <>
+            <div className="machine-add">
+              <input className="text-input" value={name} maxLength={60} placeholder="Name (optional)" aria-label="Machine name" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void add(); }} />
+              <Segmented label="Jobs it takes" value={takes} options={TAKES} onChange={setTakes} />
+              <button type="button" className="cfg-btn cfg-btn--primary" disabled={adding} onClick={add}>{adding ? 'Adding…' : 'Add'}</button>
+            </div>
+            <div className="cfg-field__hint">Add shows a QR code and a short code. Use it on a computer to have it run jobs, or on a phone to sign in there. The name and job sizes are for a computer; without a name it is called after itself.</div>
+          </>
         )}
       </section>
 

@@ -179,6 +179,14 @@ export function EngineSettings({ bot }: { bot: Bot }) {
         </div>
       )}
       {note && <div className="voice-error" role="alert">{note}</div>}
+      {starting && (
+        <div className="engine__notice">
+          <span>
+            {bot.name}’s agent is starting, which can take several minutes the first time.{' '}
+            {providers.length ? 'A model chosen now is used from the next message.' : 'The lists above fill in once it is ready.'}
+          </span>
+        </div>
+      )}
       <div className="engine__meta">
         <span className={`engine__state is-${engine.status}`} title={engine.version ? `Hermes ${engine.version}` : undefined}>
           <i aria-hidden />

@@ -126,6 +126,13 @@
 .signin__divider::before, .signin__divider::after { content: ''; flex: 1; height: 0.5px; background: var(--color-border-secondary); }
 .signin__error { padding: 12px 0 0; text-align: center; }
 .signin__foot { margin: 24px 0 0; font-size: 12px; line-height: 16px; color: var(--color-text-quaternary); }
+.signin__pair { margin: 20px 0 0; font-size: 13px; }
+.signin a { color: var(--color-text-primary); }
+/* /pair: the code a new device hands in */
+.pair-page__form { margin-top: 0; }
+.pair-page__form .signin__sub { margin-bottom: 12px; }
+.pair-page__code { height: 44px; text-align: center; font-family: var(--font-mono-stack); font-size: 20px; letter-spacing: 3px; }
+.pair-page__foot { text-align: center; }
 
 /* new group chat */
 .group-pick { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; margin-top: 6px; }

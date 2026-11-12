@@ -45,6 +45,7 @@ export function SignIn() {
           </form>
         )}
         {error && <div className="card__error signin__error">{error}</div>}
+        <p className="signin__sub signin__pair">Already signed in on another device? <a href="/pair">Sign in with a code from it</a></p>
         <p className="signin__foot">Open source. Not affiliated with xAI.</p>
       </div>
     </div>

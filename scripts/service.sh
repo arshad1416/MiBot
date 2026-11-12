@@ -3,12 +3,13 @@
 # if it stops. Nothing here needs sudo.
 #
 #   scripts/service.sh hub       the server (settings in .env beside this checkout)
-#   scripts/service.sh worker    the worker for another machine (settings in ~/.mibot/worker.env)
+#   scripts/service.sh worker    the worker for another machine (settings in ~/.mibot/worker.env; with
+#                                none yet, it waits to be connected with a code from the app)
 #   scripts/service.sh hub off   stop it and remove the service (same for worker)
 #
 # Linux uses a systemd user unit, macOS a LaunchAgent. Optional on Linux: MEMORY_MAX=300M limits the
 # service and everything it starts (the worker's agents included) to that much memory.
-# Run it again after pulling new code: it rebuilds and restarts.
+# Run it again after pulling new code: it installs what the new code needs, rebuilds and restarts.
 set -euo pipefail
 role="${1:-}"; action="${2:-on}"
 case "$role" in hub|worker) ;; *) echo "usage: scripts/service.sh hub|worker [off]"; exit 2 ;; esac
@@ -42,8 +43,15 @@ if [ "$action" = off ]; then
   exit 0
 fi
 
-example=".env.example"; [ "$role" = worker ] && example="worker.env.example"
-[ -f "$settings" ] || { echo "No settings at $settings. Create that file first, starting from $example in the checkout."; exit 1; }
+# The hub cannot start without its settings. A worker can: it waits to be connected.
+[ "$role" = worker ] || [ -f "$settings" ] || { echo "No settings at $settings. Create that file first: scripts/hub-env.sh writes one, and .env.example lists every setting."; exit 1; }
+
+# Dependencies first, when they are missing or the lockfile has moved on since they were installed.
+installed="$repo/node_modules/.package-lock.json"
+if [ ! -f "$installed" ] || [ "$repo/package-lock.json" -nt "$installed" ]; then
+  echo "Installing dependencies..."
+  (cd "$repo" && npm ci >/dev/null)
+fi
 
 echo "Building..."
 if [ "$role" = hub ]; then (cd "$repo" && npm run build >/dev/null); else (cd "$repo" && npm run build -w server >/dev/null); fi
@@ -64,6 +72,11 @@ started() {
     [ -n "$up" ] || { echo "$name was started but did not answer within a minute. See $log"; exit 1; }
   fi
   echo "$name is running. Log: $log"
+  if [ "$role" = worker ] && ! grep -qs '^WORKER_TOKEN=.' "$settings"; then
+    echo "It is not connected to a hub yet. In the app, open Settings > Machines and choose Add, then either"
+    echo "  open http://127.0.0.1:8765 on this machine and type the code, or"
+    echo "  run:  npm run pair -- '<link from the app>'"
+  fi
 }
 
 if [ "$os" = Darwin ]; then
