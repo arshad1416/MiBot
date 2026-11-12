@@ -23,6 +23,9 @@ function shellEnv(screenId?: string | null): NodeJS.ProcessEnv {
     USER: process.env.USER ?? 'root',
     LANG: process.env.LANG ?? 'C.UTF-8',
     DISPLAY: displayFor(screenId),
+    HQ_ROOT: env.boxRoot,
+    HQ_DATA: env.boxData,
+    HQ_LOGS: env.boxLogs,
   };
 }
 
@@ -44,7 +47,8 @@ export const box = {
   /** Run a bash command on the box. `screenId` picks which screen's DISPLAY it sees. */
   async bash(command: string, timeoutSec = 60, screenId?: string | null): Promise<BashResult> {
     if (provider.local) return localBash(command, timeoutSec, screenId);
-    return provider.bash(`export DISPLAY=${displayFor(screenId)}; ${command}`, timeoutSec, screenId);
+    const vars = `DISPLAY=${displayFor(screenId)} HQ_ROOT=${q(env.boxRoot)} HQ_DATA=${q(env.boxData)} HQ_LOGS=${q(env.boxLogs)}`;
+    return provider.bash(`export ${vars}; ${command}`, timeoutSec, screenId);
   },
 
   async writeFile(file: string, content: string | Buffer, mode = '0644'): Promise<void> {

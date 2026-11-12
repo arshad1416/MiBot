@@ -19,6 +19,9 @@ function secret(name: string): string {
 
 const computerProvider = (process.env.COMPUTER_PROVIDER ?? 'orgo').toLowerCase();
 
+/** A local box usually does not run as root, so its files default to the user's home. */
+const boxBase = computerProvider === 'local' ? path.join(os.homedir(), '.mibot') : '';
+
 const hermesHome = process.env.HERMES_HOME_PRIMARY ?? path.join(os.homedir(), '.hermes');
 
 export const env = {
@@ -59,6 +62,10 @@ export const env = {
   orgoComputerId: process.env.ORGO_COMPUTER_ID ?? '',
   /** This server runs on that computer, so shell commands run locally instead of through Orgo's API. */
   localBox: process.env.HQ_LOCAL === '1' || computerProvider === 'local',
+  /** On the computer: the screen scripts, each bot's browser profile and Library, and the scripts' logs. */
+  boxRoot: process.env.HQ_ROOT ?? (boxBase ? path.join(boxBase, 'hq') : '/opt/hq'),
+  boxData: process.env.HQ_DATA ?? (boxBase ? path.join(boxBase, 'data') : '/root/grokbot'),
+  boxLogs: process.env.HQ_LOGS ?? (boxBase ? path.join(boxBase, 'logs') : '/var/log/hq'),
   /** Pixel size of each screen the local provider starts. */
   localScreenSize: process.env.LOCAL_SCREEN_SIZE ?? '1440x900',
   /**

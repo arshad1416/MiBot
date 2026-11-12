@@ -14,12 +14,14 @@ import subprocess
 import time
 import urllib.request
 
-ROOT = '/opt/hq'
+# Where things live on the computer. The server passes these when it does not run as root (a local box).
+ROOT = os.environ.get('HQ_ROOT') or '/opt/hq'
+DATA = os.environ.get('HQ_DATA') or '/root/grokbot'
 SCREENS = ROOT + '/screens'
 JOBS = ROOT + '/jobs'
 EXT = ROOT + '/ext'
-LOGS = '/var/log/hq'
-PROFILES = '/root/grokbot/profiles'
+LOGS = os.environ.get('HQ_LOGS') or '/var/log/hq'
+PROFILES = DATA + '/profiles'
 HOME_PORT = 7391
 HOME_URL = 'http://127.0.0.1:%d' % HOME_PORT
 BROWSER_CLASS = 'HQBrowser'
@@ -274,6 +276,9 @@ def base_env(n):
         'LANG': os.environ.get('LANG') or 'C.UTF-8',
         'DISPLAY': ':%d' % int(n),
         'HQ_SCREEN': str(int(n)),
+        'HQ_ROOT': ROOT,
+        'HQ_DATA': DATA,
+        'HQ_LOGS': LOGS,
         'GTK_THEME': light_theme(),
         'XDG_CURRENT_DESKTOP': 'XFCE',
         'NO_AT_BRIDGE': '1',
@@ -649,7 +654,7 @@ def settle_window(n, pid, wait=4.0):
 
 def open_files(n):
     env = screen_env(n)
-    start = '/root/grokbot/files' if os.path.isdir('/root/grokbot/files') else env['HOME']
+    start = DATA + '/files' if os.path.isdir(DATA + '/files') else env['HOME']
     for name in ('thunar', 'nautilus', 'nemo', 'pcmanfm', 'caja'):
         if shutil.which(name):
             return spawn([name, start], env, 'files-%d' % int(n))
