@@ -5,11 +5,16 @@ import path from 'node:path';
 import { gatewayPid, healthy, homeKey, keyAccepted, readDotenv, spawnGateway, stopGateway, writeHermesHome } from '../gateway.js';
 import { sseEvents, type StreamEvent } from '../lib/sse.js';
 import type { JobResult, JobSpec, WorkerInfo } from '../machines.js';
+import { pairWithHub, parsePairLink, waitForPairing } from './pairing.js';
 
 /**
  * The worker: lets another machine run bots' jobs for the hub.
  *
- *   npm run worker        (settings in ~/.mibot/worker.env, see docs/machines.md)
+ *   npm run worker                  (settings in ~/.mibot/worker.env, see docs/machines.md)
+ *   npm run pair -- '<link>'        connect this machine with the link the app shows (worker/pairing.ts)
+ *
+ * With no settings yet it waits to be connected: it serves a page on this machine that takes the
+ * code from the app, and starts working once it has been given one.
  *
  * It only ever calls the hub, so it needs no open port. It checks in every few seconds to ask for
  * work. For a job it starts the bot's own Hermes agent here (a home under WORKER_DIR/engines, with
@@ -22,15 +27,31 @@ import type { JobResult, JobSpec, WorkerInfo } from '../machines.js';
 // ---------- settings ----------
 
 const settingsFile = process.env.MIBOT_WORKER_ENV ?? path.join(os.homedir(), '.mibot', 'worker.env');
-const fileVars = readDotenv(settingsFile);
+let fileVars = readDotenv(settingsFile);
 const setting = (name: string, fallback = '') => process.env[name] ?? fileVars[name] ?? fallback;
 
+if (process.argv[2] === 'pair') {
+  // `pair <link>` or `pair <hub address> <code>`
+  const given = process.argv[4] ? { hub: process.argv[3], code: process.argv[4] } : parsePairLink(process.argv[3] ?? '');
+  if (!given) {
+    console.error("usage: npm run pair -- '<link from Settings › Machines › Add>'   (or: npm run pair -- <hub address> <code>)");
+    process.exit(2);
+  }
+  try {
+    console.log(`Connected to ${given.hub} as ${await pairWithHub(settingsFile, given.hub, given.code)}. Settings are in ${settingsFile}.`);
+    process.exit(0);
+  } catch (e: any) {
+    console.error(e?.message ?? e);
+    process.exit(1);
+  }
+}
+
+if (!setting('HUB_URL') || !setting('WORKER_TOKEN')) {
+  await waitForPairing(settingsFile, Number(setting('WORKER_PAIR_PORT', '8765')));
+  fileVars = readDotenv(settingsFile);
+}
 const hubUrl = setting('HUB_URL').replace(/\/+$/, '');
 const workerToken = setting('WORKER_TOKEN');
-if (!hubUrl || !workerToken) {
-  console.error(`[worker] HUB_URL and WORKER_TOKEN are needed. Put them in ${settingsFile} (the app shows both when you add a machine).`);
-  process.exit(1);
-}
 
 const cfg = {
   dir: setting('WORKER_DIR', path.join(os.homedir(), '.mibot', 'worker')),

@@ -58,17 +58,40 @@ ImageMagick installed, and this repository with `npm ci` run in it:
 
 ## Adding a machine
 
-1. In the app: **Settings › Machines › Add a machine**. Give it a name and say which jobs it takes.
-   The app shows two lines, `HUB_URL` and `WORKER_TOKEN`. The token is shown once.
-2. On that machine: Node 22, the `hermes` CLI, and this repository with `npm ci` run in it.
-3. Save the two lines as `~/.mibot/worker.env` (see `worker.env.example` for the other settings).
-4. `npm run worker`. The machine shows as online within a few seconds.
+1. On that machine: Node 22, the `hermes` CLI, and this repository. `scripts/service.sh worker` in it
+   installs what it needs, builds it and keeps the worker running as a service of your own user
+   (systemd on Linux, launchd on macOS). With no settings yet, the worker waits to be connected.
+2. In the app: **Settings › Machines › Add**. Choose which jobs the machine takes, and a name if you
+   want one (without it the machine is called after itself). The app shows a QR code and an
+   eight-letter code. The code works once, for ten minutes.
+3. Hand the code to the machine, whichever way is nearest:
+   - **In the app on that machine**, press **Add this computer**. Its own setup page opens with the
+     code and the hub's address filled in. Check the address and press Connect.
+   - **On that machine's setup page**, `http://127.0.0.1:8765`, type the code and the hub's address.
+   - **On a machine without a screen**, run `npm run pair -- '<link>'` in the checkout, with the link
+     from **Copy link** (keep the quotes), or `npm run pair -- <hub address> <code>`.
 
-To keep it running after a reboot, `scripts/service.sh worker` installs it as a service of your own
-user (systemd on Linux, launchd on macOS). `scripts/service.sh hub` does the same for the server.
+The machine shows as online within a few seconds. Nothing has to be restarted, and no file has to be
+written by hand: the worker saves `HUB_URL` and its own key in `~/.mibot/worker.env` (readable by
+your user only). Other settings go in the same file, see `worker.env.example`.
 
-The worker has to be able to reach `HUB_URL`. On a Tailscale network that is the hub's
+The setup page only answers on the machine itself, only while the machine is not connected, and
+only sends the code when you press Connect, so another site cannot point your worker at a hub.
+
+To run the worker without the service, use `npm run worker`. `scripts/service.sh hub` keeps the
+server running the same way.
+
+The worker has to be able to reach the hub. On a Tailscale network that is the hub's
 `https://<name>.<tailnet>.ts.net` address, or `http://<tailscale-ip>:8787` when `HOST` is set to it.
+
+## Signing in on a phone or another browser
+
+The same code signs another device in. With **Settings › Machines › Add** open on a device that is
+already signed in, either scan the QR code with the phone's camera and press **Sign in on this
+device**, or open the app's address on the other device, choose **Sign in with a code from it** and
+type the code. `scripts/sign-in-link.sh` is still there for the very first sign-in.
+
+A handful of wrong codes closes pairing for ten minutes and cancels the codes that were open.
 
 ## Keeping a small machine small
 

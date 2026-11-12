@@ -34,8 +34,11 @@ export interface ComputerDetails {
 
 export type BotPatch = Partial<Pick<Bot, 'name' | 'label' | 'description' | 'instructions' | 'avatarShape' | 'avatarColor' | 'effort' | 'mode' | 'weight'>>;
 
-export interface MachinesBundle { machines: Machine[]; jobs: JobInfo[]; hubUrl: string }
+export interface MachinesBundle { machines: Machine[]; jobs: JobInfo[] }
 export type MachinePatch = Partial<Pick<Machine, 'name' | 'takes' | 'rank' | 'enabled'>>;
+/** A one-time code that adds a device: `link` is what the QR code holds. */
+export interface PairCode { id: string; code: string; expiresInMs: number; link: string; hubUrl: string }
+export interface PairStatus { state: 'open' | 'used' | 'expired'; expiresInMs: number; usedAs: 'machine' | 'browser' | null; deviceName: string | null }
 
 export const configApi = {
   settings: (botId: string) => req<BotSettingsBundle>('GET', `/bots/${botId}/settings`),
@@ -76,8 +79,11 @@ export const configApi = {
   stopOwnScreen: (botId: string) => req<{ engine: EngineInfo }>('POST', `/bots/${botId}/engine/screen/stop`),
 
   machines: () => req<MachinesBundle>('GET', '/machines'),
-  /** The token in the answer is shown once; the server keeps only its hash. */
-  addMachine: (name: string, takes: Machine['takes']) => req<{ machine: Machine; token: string }>('POST', '/machines', { name, takes }),
+  /** A code for a new machine (named `name`, or after itself when that is empty), or for signing another browser in. */
+  pairCode: (name: string, takes: Machine['takes']) => req<PairCode>('POST', '/pair/codes', { name, takes }),
+  pairStatus: (id: string) => req<PairStatus>('GET', `/pair/codes/${id}`),
+  /** Signs this browser in as whoever made the code. */
+  pairSignIn: (code: string) => req<{ ok: true }>('POST', '/pair/sign-in', { code }),
   updateMachine: (id: string, p: MachinePatch) => req<{ machine: Machine }>('PATCH', `/machines/${id}`, p),
   removeMachine: (id: string) => req<{ ok: true }>('DELETE', `/machines/${id}`),
   moveJob: (id: string, machineId: string) => req<{ ok: true }>('POST', `/jobs/${id}/move`, { machineId }),
