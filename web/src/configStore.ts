@@ -6,14 +6,14 @@ import { useStore } from './store';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type BotSettingsTab = 'general' | 'skills' | 'memories' | 'routines';
-export type AppSection = 'general' | 'computer' | 'permissions' | 'apps' | 'account';
+export type AppSection = 'general' | 'computer' | 'machines' | 'permissions' | 'apps' | 'account';
 
 interface ConfigUI {
   botSettings: { botId: string; tab: BotSettingsTab } | null;
   appSettings: AppSection | null;
   view: 'chat' | 'tasks';
   theme: Theme;
-  /** Bumped by server events (tasks, memories) so open views refetch. Keys: 'tasks', 'memories:<botId>'. */
+  /** Bumped by server events (tasks, memories, machines) so open views refetch. Keys: 'tasks', 'memories:<botId>', 'machines'. */
   versions: Record<string, number>;
   openBotSettings(botId: string, tab?: BotSettingsTab): void;
   closeBotSettings(): void;
@@ -66,6 +66,7 @@ window.addEventListener('grokbot:event', (e) => {
   const { bump } = useConfigUI.getState();
   if (ev.type === 'tasks') { bump('tasks'); bump(`tasks:${ev.botId}`); }
   if (ev.type === 'memories') bump(`memories:${ev.botId}`);
+  if (ev.type === 'machines') bump('machines');
 });
 
 // Picking a bot anywhere (sidebar, search) goes back to its chat.

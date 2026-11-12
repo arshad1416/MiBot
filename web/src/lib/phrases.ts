@@ -45,6 +45,7 @@ export function activityPhrase(live: LiveState, rows: Row[], tick: number): stri
     return name ? `Checking with ${name}` : 'Checking with another Bot';
   }
   if (kind === 'connecting_service') return nice(a.detail) ? `Working in ${a.detail}` : 'Working in a connected app';
+  if (isOnHold(live)) return a.detail || (kind === 'paused' ? 'Paused until its machine is back' : 'Waiting for a machine to take this');
   const list = PHRASES[kind] ?? PHRASES.working;
   return list[tick % list.length];
 }
@@ -64,11 +65,18 @@ const STATUS: Record<ActivityKind, string> = {
   waiting_for_you: 'Needs you',
   drafting_file: 'Writing',
   remembering: 'Remembering',
+  waiting_for_machine: 'Waiting for a machine',
+  paused: 'Paused',
 };
 
 /** True when the bot has stopped to wait for the person (approval, question, connect). */
 export function isWaitingForYou(live: LiveState | undefined): boolean {
   return !!live && (!!live.awaiting || live.activity?.kind === 'waiting_for_you');
+}
+
+/** True while the job cannot move: no machine can take it yet, or the machine running it went away. */
+export function isOnHold(live: LiveState | undefined): boolean {
+  return live?.activity?.kind === 'waiting_for_machine' || live?.activity?.kind === 'paused';
 }
 
 /** Short status word for the pill: "Thinking", "Browsing", "Working in Gmail", "Needs you". */

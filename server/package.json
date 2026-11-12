@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "tsx watch --env-file=../.env src/index.ts",
     "start": "node --env-file=../.env dist/index.js",
+    "worker": "tsx src/worker/main.ts",
+    "start:worker": "node dist/worker/main.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

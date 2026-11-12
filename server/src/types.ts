@@ -31,6 +31,8 @@ export interface Bot {
   /** Hermes engine: model id and provider for this bot; null = the engine's default. */
   model: string | null;
   provider: string | null;
+  /** How big this bot's jobs are: a 'light' job may run on a small machine, a 'heavy' one only where heavy jobs are taken. */
+  weight: JobWeight;
   generation: number;
   unread: number;
   lastPreview: string | null;
@@ -148,7 +150,9 @@ export interface NoticeBody { type: 'notice'; text: string; tone?: 'info' | 'war
 export type ActivityKind =
   | 'thinking' | 'working' | 'searching_web' | 'reading_web' | 'browsing_web' | 'on_its_computer'
   | 'running_commands' | 'waiting_on_command' | 'messaging_named' | 'connecting_service'
-  | 'waiting_for_you' | 'drafting_file' | 'remembering';
+  | 'waiting_for_you' | 'drafting_file' | 'remembering'
+  /** No machine can take the job yet / the machine running it went away mid-job. `detail` says which and why. */
+  | 'waiting_for_machine' | 'paused';
 
 export interface LiveState {
   botId: string;
@@ -172,6 +176,44 @@ export interface Task { id: string; botId: string; title: string; state: 'workin
 export interface Memory { id: string; botId: string; text: string; createdAt: number; source?: 'chat' | 'learned' }
 
 export interface Skill { id: string; botId: string; name: string; description: string; body: string; createdAt: number; updatedAt: number }
+
+export type JobWeight = 'light' | 'heavy';
+
+/** A machine that can run bots' jobs: the hub (where this server runs) or another one running the worker. */
+export interface Machine {
+  id: string;
+  name: string;
+  isHub: boolean;
+  /** Which jobs it takes. */
+  takes: JobWeight | 'both';
+  /** Lower runs first when several machines could take a job. */
+  rank: number;
+  enabled: boolean;
+  /** 'away' = it stopped checking in (asleep, off or offline); 'busy' = checking in but not taking jobs; 'never' = not seen yet. */
+  state: 'online' | 'busy' | 'away' | 'never';
+  /** Why it is not taking jobs, when it said. */
+  reason: string | null;
+  lastSeenAt: number | null;
+  platform: string | null;
+  memFreeMb: number | null;
+  memTotalMb: number | null;
+  /** Jobs it runs at once (0 = no limit) and how many it is running now. */
+  slots: number;
+  running: number;
+}
+
+/** A job that has not finished: waiting for a machine, running, or paused because its machine went away. */
+export interface JobInfo {
+  id: string;
+  botId: string;
+  botName: string;
+  title: string;
+  weight: JobWeight;
+  status: 'queued' | 'waiting' | 'running' | 'paused';
+  machineId: string | null;
+  note: string | null;
+  createdAt: number;
+}
 
 export interface LibraryFile { name: string; size: number; modifiedAt: number; isDir: boolean }
 
@@ -239,4 +281,5 @@ export type ServerEvent =
   | { type: 'tasks'; botId: string }
   | { type: 'memories'; botId: string }
   | { type: 'connections' }
+  | { type: 'machines' }
   | { type: 'ping' };

@@ -9,6 +9,16 @@ export function Switch({ on, onChange, label, disabled }: { on: boolean; onChang
   );
 }
 
+/** Title and one-line explanation at the top of a settings page. */
+export function PageHead({ title, sub }: { title: string; sub?: string }) {
+  return (
+    <div className="app-settings__head">
+      <h1>{title}</h1>
+      {sub && <p>{sub}</p>}
+    </div>
+  );
+}
+
 export function Field({ label, hint, children, htmlFor }: { label: string; hint?: ReactNode; children: ReactNode; htmlFor?: string }) {
   return (
     <div className="cfg-field">

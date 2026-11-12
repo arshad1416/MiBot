@@ -1,11 +1,15 @@
 import { db, now } from '../db.js';
 import { newId } from '../lib/ids.js';
 import { hub } from '../lib/hub.js';
+import { sseEvents, type StreamEvent } from '../lib/sse.js';
 import { appendRow, emitBot, getBotRow, getLive, getRow, setLive, updateRow } from '../store.js';
 import type { ActivityKind, MessageBody, ToolCallBody } from '../types.js';
 import { appInfo as toolkitInfo } from '../apps.js';
 import { screenForWork } from '../computer.js';
-import { engineFor } from '../engine.js';
+import { assignEngine, engineFor, engineKind, mcpToken, soulFor } from '../engine.js';
+import { readMemoryFiles, writeMemoryFiles } from '../engine-memory.js';
+import { createJob, getJob, markSeen, noteHubHistory, pruneJobs, setJob, unfinishedJobs, unseenDigest, type JobRow } from '../jobs.js';
+import { HUB, endRemote, machineRow, machinesChanged, nextChange, nextItem, place, pullRemote, startRemote, type MachineRow } from '../machines.js';
 import { instructionsFor } from './prompt.js';
 import { activityFor, appToolName, humanizeSlug, policyFor } from './tools.js';
 
@@ -13,9 +17,11 @@ import { activityFor, appToolName, humanizeSlug, policyFor } from './tools.js';
  * A turn: one message handed to the bot's Hermes engine and streamed back into the conversation.
  *
  * Hermes owns the agent loop, the history and the tools. This file only
- *  - queues turns so a bot handles one at a time,
- *  - posts the trigger to the engine's /v1/responses endpoint and turns the event stream into
- *    rows (assistant messages, tool calls) and live state (what the bot is doing right now),
+ *  - queues turns so a bot handles one at a time (each turn is a job on disk, see jobs.ts),
+ *  - finds a machine for the turn (machines.ts), posts the trigger to the agent's /v1/responses
+ *    endpoint there and turns the event stream into rows (assistant messages, tool calls) and live
+ *    state (what the bot is doing right now); a turn whose machine goes away is paused and picked up
+ *    again,
  *  - keeps the bookkeeping the app's own tools need while a turn runs (see mcp.ts): which tool-call
  *    row a call belongs to, and approvals the user has to answer before a call goes ahead.
  */
@@ -34,10 +40,64 @@ const aborts = new Map<string, AbortController>();
 export function enqueue(botId: string, trigger: Trigger) {
   // A new message from the user supersedes whatever is waiting for their approval.
   if (trigger.type === 'user') expireApprovals(botId);
+  const bot = getBotRow(botId);
+  if (!bot || bot.kind === 'room') return;
+  queueJob(createJob(botId, trigger), trigger);
+  machinesChanged();
+}
+
+function queueJob(job: JobRow, trigger: Trigger) {
+  const botId = job.bot_id;
   const prev = queues.get(botId) ?? Promise.resolve();
-  const next = prev.then(() => runTurn(botId, trigger)).catch((e) => console.error('[agent] turn failed', botId, e));
+  const next = prev.then(() => runTurn(job, trigger)).catch((e) => console.error('[agent] turn failed', botId, e));
   queues.set(botId, next);
   next.finally(() => { if (queues.get(botId) === next) queues.delete(botId); });
+}
+
+/** On server start: pick up the jobs the last run left unfinished, in the order they were asked for. */
+export function resumeJobs() {
+  pruneJobs();
+  for (const job of unfinishedJobs(12 * 3600_000)) {
+    let trigger: Trigger;
+    try { trigger = JSON.parse(job.trigger); } catch { setJob(job.id, { status: 'failed', finished_at: now() }); continue; }
+    if (job.attempts > 0) {
+      closeStaleRows(job);
+      appendRow(job.bot_id, 'notice', { type: 'notice', text: 'The server restarted in the middle of this. Picking it up again.', tone: 'info' });
+    }
+    setJob(job.id, { status: 'queued', note: null });
+    queueJob(job, trigger);
+  }
+}
+
+/** What a job was in the middle of writing when the server stopped: nothing will finish those rows now. */
+function closeStaleRows(job: JobRow) {
+  if (job.start_seq === null || getBotRow(job.bot_id)?.generation !== job.generation) return;
+  const rows = db.prepare("SELECT seq, body FROM rows WHERE bot_id=? AND generation=? AND seq>=? AND kind IN ('message','tool-call')").all(job.bot_id, job.generation, job.start_seq) as { seq: number; body: string }[];
+  for (const r of rows) {
+    const b = JSON.parse(r.body);
+    if (b.type === 'tool-call' && (b.status === 'running' || b.status === 'awaiting-approval')) updateRow(job.bot_id, r.seq, { ...b, status: 'error', summary: 'Interrupted' });
+    else if (b.type === 'message' && b.streaming) updateRow(job.bot_id, r.seq, { ...b, streaming: false });
+  }
+}
+
+/** Run an unfinished job on another machine. Returns why not, when it cannot be moved. */
+export function moveJob(jobId: string, machineId: string): string | null {
+  const job = getJob(jobId);
+  if (!job || !['queued', 'waiting', 'running', 'paused'].includes(job.status)) return 'That job is no longer waiting.';
+  if (!machineRow(machineId)) return 'That machine is gone.';
+  if (job.status === 'running' && job.machine_id === HUB) return 'It is running here right now. Stop it first.';
+  setJob(jobId, { move_to: machineId });
+  pullRemote(jobId);
+  machinesChanged();
+  return null;
+}
+
+/** Stop an unfinished job: the running one is interrupted, one still in line is skipped when its turn comes. */
+export function stopJob(jobId: string) {
+  const job = getJob(jobId);
+  if (!job) return;
+  if (turns.get(job.bot_id)?.jobId === jobId) return interrupt(job.bot_id);
+  if (job.status === 'queued') { setJob(jobId, { status: 'stopped', finished_at: now() }); machinesChanged(); }
 }
 
 export function interrupt(botId: string) {
@@ -78,6 +138,7 @@ interface ToolRef { seq: number; callId: string; name: string; claimed: boolean;
 interface Outcome { status?: ToolCallBody['status']; summary?: string }
 
 interface Turn {
+  jobId: string;
   botId: string;
   userId: string;
   /** How many bot-to-bot hops led here (send_to_bot stops a ping-pong at 3). */
@@ -229,34 +290,6 @@ function describeArgs(args: any): string {
 
 // ---------- the engine's event stream ----------
 
-interface StreamEvent { type: string; data: any }
-
-async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
-  const dec = new TextDecoder();
-  let buf = '';
-  for await (const chunk of body as any as AsyncIterable<Uint8Array>) {
-    buf = (buf + dec.decode(chunk, { stream: true })).replace(/\r\n/g, '\n');
-    let end: number;
-    while ((end = buf.indexOf('\n\n')) >= 0) {
-      const frame = buf.slice(0, end);
-      buf = buf.slice(end + 2);
-      let event = '';
-      const data: string[] = [];
-      for (const line of frame.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim();
-        else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
-      }
-      if (!data.length) continue; // a keepalive comment
-      const raw = data.join('\n');
-      if (raw === '[DONE]') continue;
-      try {
-        const json = JSON.parse(raw);
-        yield { type: event || json?.type || '', data: json };
-      } catch { /* not ours to understand */ }
-    }
-  }
-}
-
 async function failureText(res: Response): Promise<string> {
   const raw = await res.text().catch(() => '');
   try {
@@ -299,13 +332,155 @@ function captionFrom(reasoning: string): string | null {
 /** Hermes' own tool lookup (it loads rarely used tools on demand). */
 const TOOLBOX = new Set(['tool_search', 'tool_describe']);
 
-async function runTurn(botId: string, trigger: Trigger) {
+/** A job that keeps losing its machine is given up on after this many starts. */
+const MAX_ATTEMPTS = 5;
+
+/** Wait until a machine can take the job, saying in the conversation's status line what it is waiting for. */
+async function machineFor(job: JobRow, signal: AbortSignal): Promise<MachineRow> {
+  const botId = job.bot_id;
+  const userId: string = getBotRow(botId).user_id;
+  let said = '';
+  for (;;) {
+    const j = getJob(job.id)!;
+    const p = place({
+      userId, weight: j.weight,
+      // A job that already started stays with its machine (its agent holds the thread) unless the user moved it.
+      pin: j.move_to ?? (j.attempts > 0 ? j.machine_id : null),
+      hubOnly: (engineKind(botId) ?? assignEngine(botId)) === 'primary',
+    });
+    if ('machine' in p) return p.machine;
+    if (p.wait !== said) {
+      said = p.wait;
+      const paused = j.attempts > 0;
+      setJob(job.id, { status: paused ? 'paused' : 'waiting', note: p.wait });
+      setLive(botId, { isRunning: true, activity: { kind: paused ? 'paused' : 'waiting_for_machine', detail: p.wait, since: now() }, caption: p.wait });
+      machinesChanged();
+    }
+    await nextChange(signal, 5000);
+  }
+}
+
+/** The body of the agent's POST /v1/responses for this start of the job on this machine. */
+async function requestFor(job: JobRow, trigger: Trigger, machine: MachineRow): Promise<Record<string, unknown>> {
+  const botId = job.bot_id;
   const bot = getBotRow(botId);
-  if (!bot || bot.kind === 'room') return;
+  let input = triggerText(trigger);
+  const missed = unseenDigest(job, machine.id);
+  if (job.attempts > 1) {
+    input = missed
+      ? `[Note: this job was interrupted before it finished and is being picked up again. Below is what the conversation holds that you may not have on this machine, including the steps already taken on this job. Do not repeat a step that is done; carry on and finish the request.]\n\n${missed}\n\n[The request:]\n${input}`
+      : `[Note: this job was interrupted before it finished and is being picked up again. Carry on and finish the request.]\n\n${input}`;
+  } else if (missed) {
+    input = `[Catch-up: part of this conversation happened while you were working from another machine. What you missed:]\n\n${missed}\n\n[Now:]\n${input}`;
+  }
+  if (bot.handback_at) {
+    input = `[Note: the user took control of your screen for a while and has just handed it back. Look at the screen before you rely on what was there.]\n\n${input}`;
+    db.prepare('UPDATE bots SET handback_at=NULL WHERE id=?').run(botId);
+  }
+  return {
+    model: bot.model || 'hermes-agent',
+    ...(bot.provider ? { provider: bot.provider } : {}),
+    input,
+    instructions: await instructionsFor(bot.user_id, botId, machine.id === HUB ? undefined : machine.name),
+    // One engine-side thread per conversation; "New chat" bumps the generation and starts another.
+    conversation: `hq-${botId}-g${bot.generation}`,
+    stream: true,
+    store: true,
+    model_options: { reasoning_effort: bot.effort ?? 'medium' },
+  };
+}
+
+/** The job runs on another machine. Returns 'again' when it has to be started once more (here or elsewhere). */
+async function* remoteTurn(job: JobRow, machine: MachineRow, request: Record<string, unknown>, signal: AbortSignal): AsyncGenerator<StreamEvent, 'done' | 'again'> {
+  const botId = job.bot_id;
+  const run = startRemote(machine.id, {
+    jobId: job.id, attempt: job.attempts, botId, botName: getBotRow(botId).name,
+    soul: soulFor(botId), mcp: { path: `/mcp/${botId}`, token: mcpToken(botId) }, memory: readMemoryFiles(botId), request,
+  });
+  try {
+    for (;;) {
+      const item = await nextItem(run, signal);
+      if ('ev' in item) yield item.ev;
+      else if ('lost' in item) {
+        const note = `Paused until ${machine.name} is back`;
+        setJob(job.id, { status: 'paused', note });
+        appendRow(botId, 'notice', { type: 'notice', text: `${machine.name} stopped answering, so it is probably asleep. This job is paused and picks up when it is back.`, tone: 'info' });
+        setLive(botId, { isRunning: true, activity: { kind: 'paused', detail: note, since: now() }, caption: note });
+        machinesChanged();
+      } else if ('back' in item) {
+        setJob(job.id, { status: 'running', note: null });
+        appendRow(botId, 'notice', { type: 'notice', text: `${machine.name} is back. Picking up where it left off.`, tone: 'info' });
+        setLive(botId, { isRunning: true, activity: { kind: 'thinking', since: now() }, caption: null });
+        machinesChanged();
+      } else if ('gone' in item) return 'again';
+      else {
+        if (item.done.memory) writeMemoryFiles(botId, item.done.memory);
+        if (item.done.ok) return 'done';
+        if (item.done.interrupted) return 'again';
+        throw new Error(item.done.error || 'the agent run failed');
+      }
+    }
+  } finally {
+    endRemote(run);
+  }
+}
+
+/**
+ * The agent's event stream for a job, from whichever machine runs it. When the run breaks off (the
+ * machine went away for good, the job was moved) it is started again and the stream carries on;
+ * `onBreak` lets the caller tidy up what the broken run left half done.
+ */
+async function* turnEvents(job: JobRow, trigger: Trigger, t: { signal: AbortSignal; onBreak: () => void }): AsyncGenerator<StreamEvent> {
+  const botId = job.bot_id;
+  for (;;) {
+    const machine = await machineFor(job, t.signal);
+    if (job.attempts >= MAX_ATTEMPTS) throw new Error('this job was interrupted too many times');
+    noteHubHistory(job);
+    setJob(job.id, {
+      status: 'running', machine_id: machine.id, attempts: job.attempts + 1, note: null,
+      started_at: job.started_at ?? now(), start_seq: job.start_seq ?? getBotRow(botId).next_seq,
+    });
+    job = getJob(job.id)!;
+    machinesChanged();
+    setLive(botId, { isRunning: true, activity: { kind: 'thinking', since: now() }, caption: null });
+    const request = await requestFor(job, trigger, machine);
+
+    if (machine.id !== HUB) {
+      if ((yield* remoteTurn(job, machine, request, t.signal)) === 'done') return markSeen(job, machine.id);
+      t.onBreak();
+      continue;
+    }
+
+    // The screen first: the engine's browser and computer tools point at it.
+    await screenForWork(getBotRow(botId).user_id, botId).catch((e) => console.warn(`[computer] screen not ready for ${botId}: ${e?.message ?? e}`));
+    const engine = await engineFor(botId);
+    if (t.signal.aborted) throw new Error('interrupted');
+    const res = await fetch(`${engine.url}/v1/responses`, {
+      method: 'POST',
+      signal: t.signal,
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...(engine.key ? { authorization: `Bearer ${engine.key}` } : {}) },
+      body: JSON.stringify(request),
+    });
+    if (!res.ok || !res.body) throw new Error(await failureText(res));
+    yield* sseEvents(res.body);
+    return markSeen(job, HUB);
+  }
+}
+
+async function runTurn(job: JobRow, trigger: Trigger) {
+  const botId = job.bot_id;
+  const bot = getBotRow(botId);
+  // The bot was deleted, or the job was stopped while it stood in line.
+  if (!bot || getJob(job.id)?.status !== 'queued') return;
+  // "New chat" since the job was queued: it belongs to the conversation that is open now.
+  if (bot.generation !== job.generation) {
+    db.prepare('UPDATE jobs SET generation=?, row_seq=NULL, start_seq=NULL WHERE id=?').run(bot.generation, job.id);
+    job = getJob(job.id)!;
+  }
   const userId: string = bot.user_id;
   const ctrl = new AbortController();
   aborts.set(botId, ctrl);
-  const turn: Turn = { botId, userId, depth: trigger.type === 'bot' ? trigger.depth : 0, silent: false, tools: [], outcomes: new Map() };
+  const turn: Turn = { jobId: job.id, botId, userId, depth: trigger.type === 'bot' ? trigger.depth : 0, silent: false, tools: [], outcomes: new Map() };
   turns.set(botId, turn);
   setLive(botId, { isRunning: true, activity: { kind: 'thinking', since: now() }, awaiting: null, startedAt: now(), caption: null, steps: 0 });
 
@@ -336,6 +511,16 @@ async function runTurn(botId: string, trigger: Trigger) {
     db.prepare('UPDATE bots SET unread = unread + 1 WHERE id=?').run(botId);
     wroteText = true;
   };
+  /** Tool calls the stream announced and never finished are closed with this outcome. */
+  const closeTools = (patch: Partial<ToolCallBody>) => {
+    for (const ref of turn.tools) {
+      if (ref.done) continue;
+      ref.done = true;
+      const row = getRow(botId, ref.seq);
+      if (row?.body.type !== 'tool-call' || (row.body.status !== 'running' && row.body.status !== 'awaiting-approval')) continue;
+      patchToolRow(botId, ref.seq, patch);
+    }
+  };
 
   let reasoning = '';
   let lastCaption = 0;
@@ -348,38 +533,19 @@ async function runTurn(botId: string, trigger: Trigger) {
   const outputsSeen = new Set<string>();
   let steps = 0;
   let failed = false;
+  // A run that broke off starts again as a new response: what it left half done is closed first.
+  const onBreak = () => {
+    closeMessage();
+    closeTools({ status: 'error', summary: 'Interrupted' });
+    turn.tools.length = 0;
+    outputsSeen.clear();
+    expireApprovals(botId);
+    wroteText = false;
+    reasoning = '';
+  };
 
   try {
-    // The screen first: the engine's browser and computer tools point at it.
-    await screenForWork(userId, botId).catch((e) => console.warn(`[computer] screen not ready for ${botId}: ${e?.message ?? e}`));
-    const engine = await engineFor(botId);
-    if (ctrl.signal.aborted) throw new Error('interrupted');
-
-    let input = triggerText(trigger);
-    if (bot.handback_at) {
-      input = `[Note: the user took control of your screen for a while and has just handed it back. Look at the screen before you rely on what was there.]\n\n${input}`;
-      db.prepare('UPDATE bots SET handback_at=NULL WHERE id=?').run(botId);
-    }
-
-    const res = await fetch(`${engine.url}/v1/responses`, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...(engine.key ? { authorization: `Bearer ${engine.key}` } : {}) },
-      body: JSON.stringify({
-        model: bot.model || 'hermes-agent',
-        ...(bot.provider ? { provider: bot.provider } : {}),
-        input,
-        instructions: await instructionsFor(userId, botId),
-        // One engine-side thread per conversation; "New chat" bumps the generation and starts another.
-        conversation: `hq-${botId}-g${bot.generation}`,
-        stream: true,
-        store: true,
-        model_options: { reasoning_effort: bot.effort ?? 'medium' },
-      }),
-    });
-    if (!res.ok || !res.body) throw new Error(await failureText(res));
-
-    for await (const ev of sseEvents(res.body)) {
+    for await (const ev of turnEvents(job, trigger, { signal: ctrl.signal, onBreak })) {
       const d = ev.data;
       switch (ev.type) {
         case 'response.output_text.delta': {
@@ -486,14 +652,11 @@ async function runTurn(botId: string, trigger: Trigger) {
     if (!stopped) console.error('[agent]', botId, e);
   } finally {
     closeMessage();
-    for (const ref of turn.tools) {
-      if (ref.done) continue;
-      const row = getRow(botId, ref.seq);
-      if (row?.body.type !== 'tool-call' || (row.body.status !== 'running' && row.body.status !== 'awaiting-approval')) continue;
-      patchToolRow(botId, ref.seq, failed ? { status: 'error', summary: ctrl.signal.aborted ? 'Stopped' : 'Did not finish' } : { status: 'done' });
-    }
+    closeTools(failed ? { status: 'error', summary: ctrl.signal.aborted ? 'Stopped' : 'Did not finish' } : { status: 'done' });
     if (aborts.get(botId) === ctrl) aborts.delete(botId);
     if (turns.get(botId) === turn) turns.delete(botId);
+    setJob(job.id, { status: !failed ? 'done' : ctrl.signal.aborted ? 'stopped' : 'failed', note: null, finished_at: now() });
+    machinesChanged();
     // An approval asked for outside this turn may still be waiting; leave its state alone.
     if (!pendingApprovals(botId).length) setLive(botId, { isRunning: false, activity: null, awaiting: null, startedAt: null, caption: null });
     else setLive(botId, { isRunning: false, caption: null });

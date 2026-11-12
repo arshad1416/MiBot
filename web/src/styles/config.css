@@ -214,3 +214,23 @@
 
 /* knob contrasts with the "on" track (matters for black bots in dark mode) */
 .toggle.is-on .toggle__knob { background: var(--bot-on-action, #FFFFFF); }
+
+/* ---------- Settings: Machines ---------- */
+.machine-row { flex-wrap: wrap; gap: 8px; }
+.machine-row.is-off .cfg-row__text { opacity: 0.6; }
+.machine-row .cfg-row__text { flex-basis: 130px; }
+.machine-row__chip { margin-left: 8px; vertical-align: 1px; }
+.machine-row__order { display: inline-flex; gap: 2px; }
+.machine-row__order .icon-btn { width: 26px; height: 26px; font-size: 13px; color: var(--color-text-secondary); }
+.machine-row__order .icon-btn:disabled { opacity: 0.3; }
+/* Holds the place of the Remove button on the hub's row, so the controls line up. */
+.machine-row__spacer { width: 74px; flex-shrink: 0; }
+.machine-add { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.machine-add input.text-input { width: auto; flex: 1 1 180px; min-width: 0; height: 32px; }
+select.text-input.machine-move { width: auto; max-width: 150px; height: 30px; padding: 0 8px; flex: 0 0 auto; }
+.machine-new { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); }
+.machine-new__title { font-size: 13px; font-weight: 500; line-height: 18px; color: var(--color-text-primary); }
+.machine-new__steps { margin: 0; padding-left: 18px; font-size: 13px; line-height: 20px; color: var(--color-text-secondary); }
+.machine-new__env { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--color-bg-tertiary); font-family: var(--font-mono-stack); font-size: 12px; line-height: 18px; color: var(--color-text-primary); overflow-x: auto; user-select: all; }
+.machine-new__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.machine-new__actions .cfg-btn { display: inline-flex; align-items: center; gap: 6px; }
