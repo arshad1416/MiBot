@@ -192,8 +192,8 @@ server/src/         API, Hermes adapter (agent/loop.ts), engines (engine.ts), MC
 server/box/         what runs on the computer to dress a screen (desktop, dock, home screen, Chrome)
 web/src/            chat, bot settings, app connections, computer viewer, voice
 android/            the Android app: core (the hub's API in plain Kotlin) and app (the screens)
-scripts/            pack, install, Hermes config helper, sign-in link, first settings for a hub at home (hub-env.sh), run as a service (service.sh), the characters and icons (gen-avatars.mjs, gen-icons.mjs)
-tests/              Playwright end-to-end test, machine handoff test
+scripts/            pack, install, Hermes config helper, sign-in link, first settings for a hub at home (hub-env.sh), run as a service (service.sh), the characters and icons (gen-avatars.mjs, gen-icons.mjs), a practice hub for trying an app (dev-hub.mjs)
+tests/              Playwright end-to-end test, machine handoff test, the stand-in for Hermes they share with the practice hub
 docs/               architecture; the Orgo and xAI/Composio guides predate the Hermes engine
 ```
 

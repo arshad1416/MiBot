@@ -50,4 +50,10 @@ cd android
 ./gradlew -p core test -PhubUrl=http://127.0.0.1:8787 -PhubCode=…   # also runs against a real hub, with a fresh pairing code
 ```
 
+To try the app without your real hub or a real agent, start a practice hub. It prints an address and a one-time code for the app's "Type the code instead" screen, its bots answer through a stand-in agent, and everything it stores is removed when you stop it:
+
+```bash
+node scripts/dev-hub.mjs --url http://10.0.2.2:18891    # 10.0.2.2 is how the Android emulator reaches this computer
+```
+
 The characters and icons are MiBot's own, written as arithmetic in `scripts/gen-avatars.mjs` and `scripts/gen-icons.mjs`. Running them writes the tables both the web app and the Android app draw from, plus the app icon and the favicon.

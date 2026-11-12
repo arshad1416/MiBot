@@ -74,10 +74,10 @@ fun HomeScreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && app.store.notifications && !app.notifier.allowed) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    val primary = state.primary
     val q = query.trim()
     val others = state.others.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) || it.label.contains(q, ignoreCase = true) }
-    val showPrimary = primary != null && (q.isEmpty() || primary.name.contains(q, ignoreCase = true))
+    // The primary bot, unless the search is for another.
+    val primary = state.primary?.takeIf { q.isEmpty() || it.name.contains(q, ignoreCase = true) }
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -98,12 +98,12 @@ fun HomeScreen() {
         }
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 12.dp)) {
-            if (showPrimary && primary != null) {
+            if (primary != null) {
                 item(key = "primary") { PrimaryBot(primary, state.live[primary.id]) { nav.go(Dest.Chat(primary.id)) } }
             }
             items(others, key = { it.id }) { bot -> BotRow(bot, state.live[bot.id], tick) { nav.go(Dest.Chat(bot.id)) } }
             if (!state.ready) item { EmptyNote(if (state.problem != null) "Waiting for your hub…" else "Loading your bots…") }
-            else if (!showPrimary && others.isEmpty()) item { EmptyNote(if (q.isEmpty()) "No bots yet. Make one with the plus button." else "No bot is called that.") }
+            else if (primary == null && others.isEmpty()) item { EmptyNote(if (q.isEmpty()) "No bots yet. Make one with the plus button." else "No bot is called that.") }
         }
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {

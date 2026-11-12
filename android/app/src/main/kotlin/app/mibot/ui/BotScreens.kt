@@ -47,10 +47,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
@@ -85,7 +83,7 @@ fun ProfileScreen(botId: String) {
     val nav = LocalNav.current
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     val state by hub.state.collectAsStateWithLifecycle()
     val bot = state.bot(botId)
     if (bot == null) {
@@ -109,7 +107,7 @@ fun ProfileScreen(botId: String) {
         action = {
             MoreButton(buildList {
                 if (!bot.isPrimary) add(MenuItem("Make primary", MiIcons.star) { run { hub.client.makePrimary(botId) } })
-                add(MenuItem("Copy ID", MiIcons.copy) { clipboard.setText(AnnotatedString(botId)) })
+                add(MenuItem("Copy ID", MiIcons.copy) { copy(botId) })
                 if (!bot.isPrimary) add(MenuItem("Delete bot", MiIcons.trash, danger = true) { confirmDelete = true })
             })
         },

@@ -45,8 +45,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -325,7 +323,7 @@ private fun StepsLine(item: ChatItem.Steps) {
 /** Messages in a row from one sender. The person's own sit on the right in the bot's colour. */
 @Composable
 private fun MessageGroup(group: ChatItem.Group, bot: Bot, bots: List<Bot>, colors: BotColors) {
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val widest = maxWidth * if (group.mine) 0.82f else 0.92f
         Column(Modifier.fillMaxWidth(), horizontalAlignment = if (group.mine) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -349,7 +347,7 @@ private fun MessageGroup(group: ChatItem.Group, bot: Bot, bots: List<Bot>, color
                 val shape = RoundedCornerShape(22.dp)
                 Column(
                     Modifier.widthIn(max = widest).clip(shape).background(if (group.mine) colors.bubble else Mi.colors.surface)
-                        .combinedClickable(onClick = {}, onLongClick = { clipboard.setText(AnnotatedString(body.text)) })
+                        .combinedClickable(onClick = {}, onLongClick = { copy(body.text) })
                         .padding(horizontal = 16.dp, vertical = 11.dp),
                 ) {
                     if (group.mine) Text(body.text, style = Type.body, color = colors.onBubble)

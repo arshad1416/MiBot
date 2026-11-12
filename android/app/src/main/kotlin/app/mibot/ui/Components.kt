@@ -1,5 +1,6 @@
 package app.mibot.ui
 
+import android.content.ClipData
 import android.graphics.BitmapFactory
 import android.util.Base64
 import android.util.LruCache
@@ -45,6 +46,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +61,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -70,6 +74,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -354,6 +359,14 @@ fun MoreButton(items: List<MenuItem>, modifier: Modifier = Modifier) {
 }
 
 // ---------- small helpers ----------
+
+/** Puts text on the phone's clipboard. */
+@Composable
+fun rememberCopy(): (String) -> Unit {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    return { text -> scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("MiBot", text))) } }
+}
 
 /** A number that grows by one every `periodMs`, to redraw things that depend on the clock. */
 @Composable
