@@ -298,6 +298,7 @@ export function initEngines() {
 /** Providers worth showing even when not signed in. */
 const WELL_KNOWN = ['anthropic', 'openai-codex', 'xai-oauth', 'xai', 'openrouter', 'nous', 'gemini', 'openai-api'];
 
+/** What each agent last said it offers. Asked again after 15 s; the old answer stays for a panel whose agent is down. */
 const optionsCache = new Map<string, { at: number; data: any }>();
 
 async function modelOptions(botId: string, e: { url: string; key: string }): Promise<any | null> {
@@ -331,12 +332,37 @@ function toProviders(data: any): EngineProvider[] {
   return out.sort((a, b) => rank(a) - rank(b));
 }
 
+/**
+ * The list for a managed bot whose own agent is not answering yet: what it gave last, else what
+ * another of the same person's agents gives. A new agent starts from the same sign-ins, keys and
+ * default model as the others on this computer, so the list is right until someone signs this bot
+ * in to something else, and the bot's own agent replaces it as soon as it is up.
+ */
+async function standInOptions(botId: string, userId: string): Promise<any | null> {
+  const own = optionsCache.get(botId)?.data;
+  if (own) return own;
+  const others = db.prepare("SELECT id, engine, engine_port FROM bots WHERE user_id=? AND id<>? AND engine IN ('primary','managed') ORDER BY (engine='primary') DESC, created_at ASC").all(userId, botId) as any[];
+  for (const o of others) {
+    const known = optionsCache.get(o.id)?.data;
+    if (known) return known;
+  }
+  for (const o of others) {
+    if (starting.has(o.id) || (o.engine === 'managed' && !o.engine_port)) continue;
+    const e = o.engine === 'primary' ? { url: env.hermesUrl, key: primaryKey() } : { url: managedUrl(o.id), key: managedKey(o.id) };
+    if (!(await healthy(e.url, 800))) continue;
+    const data = await modelOptions(o.id, e);
+    if (data) return data;
+  }
+  return null;
+}
+
 export async function engineInfo(botId: string): Promise<EngineInfo> {
   const b = botRow(botId);
   if (!b) throw new Error('bot not found');
   const kind = engineKind(botId);
   const base: EngineInfo = { botId, profile: kind === 'primary' ? 'default' : botId, status: 'stopped', error: null, model: b.model ?? null, provider: b.provider ?? null, version: null, providers: [], ownScreen: kind ? ownScreenOn(botId) : false };
   if (!kind) return { ...base, status: 'error', error: 'This bot has no agent.' };
+  const choices = (data: any) => ({ model: b.model ?? data?.model ?? null, provider: b.provider ?? data?.provider ?? null, providers: toProviders(data) });
 
   let e: { url: string; key: string };
   if (kind === 'primary') e = { url: env.hermesUrl, key: primaryKey() };
@@ -346,24 +372,20 @@ export async function engineInfo(botId: string): Promise<EngineInfo> {
   }
 
   const health = await healthy(e.url);
-  if (!health) {
-    if (kind === 'primary') return { ...base, status: 'error', error: `The agent at ${env.hermesUrl} is not answering.` };
-    if (starting.has(botId)) return { ...base, status: 'starting' };
-    const failed = failures.get(botId);
-    if (failed) return { ...base, status: 'error', error: failed };
-    provisionEngine(botId);
-    return { ...base, status: 'starting' };
+  if (!health && kind === 'primary') return { ...base, status: 'error', error: `The agent at ${env.hermesUrl} is not answering.` };
+  if (!health || starting.has(botId)) {
+    // The model can be chosen before the agent is up: the choice is kept here and sent with each turn.
+    const failed = !health && !starting.has(botId) ? failures.get(botId) : undefined;
+    // Joins the start that is under way, when there is one.
+    if (!failed) provisionEngine(botId);
+    return { ...base, ...choices(await standInOptions(botId, b.user_id)), ...(failed ? { status: 'error', error: failed } : { status: 'starting' }) };
   }
-  if (kind === 'managed' && starting.has(botId)) return { ...base, status: 'starting' };
 
-  const data = await modelOptions(botId, e);
   return {
     ...base,
+    ...choices(await modelOptions(botId, e)),
     status: 'ready',
     version: typeof health.version === 'string' && health.version !== 'unknown' ? health.version : null,
-    model: b.model ?? data?.model ?? null,
-    provider: b.provider ?? data?.provider ?? null,
-    providers: toProviders(data),
   };
 }
 

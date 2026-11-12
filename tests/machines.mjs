@@ -4,8 +4,9 @@
 //
 // It checks that a machine is added with a one-time code (from the command line and from the page a
 // worker serves), that a heavy job goes to the worker, that a job is paused when the worker "sleeps"
-// (SIGSTOP) and carries on when it wakes, and that a job whose worker died is started again with a
-// note of what was already done. Needs nothing but `npm ci`; takes about a minute.
+// (SIGSTOP) and carries on when it wakes, that a job whose worker died is started again with a
+// note of what was already done, and that a new bot's model can be chosen while its agent is still
+// starting. Needs nothing but `npm ci`; takes about a minute.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,6 +24,7 @@ const screensBefore = new Set(screens());
 
 // ---------- a stand-in for `hermes gateway run` ----------
 // Each "tool call" takes `delay` ms; the last "steps=N delay=M" in the input sets the pace.
+// While the file `slow-start` exists, a gateway that is starting does not answer yet.
 fs.writeFileSync(path.join(dir, 'stub-hermes.mjs'), `
 import http from 'node:http';
 import fs from 'node:fs';
@@ -31,9 +33,11 @@ const home = process.env.HERMES_HOME;
 const env = Object.fromEntries(fs.readFileSync(path.join(home, '.env'), 'utf8').split('\\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
 fs.writeFileSync(path.join(home, 'gateway.pid'), JSON.stringify({ pid: process.pid, hermes_home: home }));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+while (fs.existsSync(${JSON.stringify(path.join(dir, 'slow-start'))})) await sleep(200);
 http.createServer(async (req, res) => {
   if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok', version: 'stub' }));
   if (req.headers.authorization !== 'Bearer ' + env.API_SERVER_KEY) { res.statusCode = 401; return res.end('{}'); }
+  if (req.url === '/api/model/options') return res.end(JSON.stringify({ provider: 'openai-codex', model: 'stub-large', providers: [{ slug: 'openai-codex', name: 'ChatGPT', auth_type: 'oauth', authenticated: true, featured_models: ['stub-large', 'stub-small'] }] }));
   if (req.url !== '/v1/responses') return res.end('{"data":[]}');
   let raw = '';
   for await (const c of req) raw += c;
@@ -179,6 +183,18 @@ try {
   const phoneCookie = (signIn.headers.get('set-cookie') ?? '').split(';')[0];
   const me = await (await fetch(`${HUB}/api/auth/me`, { headers: { cookie: phoneCookie } })).json();
   check('a phone signs in with a code', signIn.ok && me.user?.email === 'test@example.com' && (await api('GET', `/pair/codes/${phoneCode.id}`)).deviceName === 'an iPhone');
+
+  // A new bot's agent can take minutes to start; its model list is there meanwhile, from the agent that is up.
+  const slowStart = path.join(dir, 'slow-start');
+  fs.writeFileSync(slowStart, '');
+  const { bot: newcomer } = await api('POST', '/bots', { name: 'Newcomer' });
+  const engine = async () => (await api('GET', `/bots/${newcomer.id}/engine`)).engine;
+  const early = await engine();
+  check('a new bot has its model list while its agent starts', early.status === 'starting' && early.providers[0]?.models.includes('stub-small'));
+  await api('PATCH', `/bots/${newcomer.id}/engine`, { provider: 'openai-codex', model: 'stub-small' });
+  fs.rmSync(slowStart);
+  const ready = await until('the new agent to start', async () => { const e = await engine(); return e.status === 'ready' && e; });
+  check('and keeps the model chosen meanwhile', ready.model === 'stub-small' && ready.providers.length === 1);
 
   // Guessing closes pairing for a while, the open codes included.
   const openCode = await api('POST', '/pair/codes', {});
