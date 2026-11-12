@@ -39,7 +39,8 @@ A job that is interrupted five times is given up on.
   machine the agent uses that machine's shell, files and browser, and is told so. Nobody can watch
   that work in the app.
 - **Not the first Bot.** It is the Hermes agent that already runs on the hub, so its jobs always
-  run there.
+  run there. On a hub with no agent of its own to keep (`HERMES_URL=` left empty in `.env`), the
+  first Bot is like the others and can run anywhere.
 - **Model sign-ins are per machine.** An agent started by a worker inherits model settings and keys
   from that machine's own `~/.hermes`, the same way the hub's extra Bots do.
 

@@ -14,7 +14,8 @@ import type { EngineInfo, EngineProvider } from './types.js';
  *
  * - The 'primary' engine is a Hermes gateway that already runs on the computer (HERMES_URL, home
  *   HERMES_HOME_PRIMARY). It has its own life: messaging, memory, model. We only talk to its API
- *   server; we never write its config, restart it or stop it.
+ *   server; we never write its config, restart it or stop it. With HERMES_URL set to nothing there
+ *   is no such agent, and every bot is a managed one.
  * - A 'managed' engine is a Hermes home of our own under ENGINES_DIR/<botId> with its own
  *   `hermes gateway run`, started here and left running when this server exits. Its home sits
  *   outside ~/.hermes, so Hermes treats it as a separate tenant beside the primary gateway.
@@ -62,12 +63,12 @@ function freePort(): number {
   return p;
 }
 
-/** Give a new agent bot its engine: the existing agent if nobody has it yet, otherwise one of our own. */
+/** Give a new agent bot its engine: the existing agent if there is one and nobody has it yet, otherwise one of our own. */
 export function assignEngine(botId: string): EngineKind {
   const b = botRow(botId);
   if (!b) throw new Error('bot not found');
   if (b.engine === 'primary' || b.engine === 'managed') return b.engine;
-  if (!primaryBotId()) {
+  if (env.hermesUrl && !primaryBotId()) {
     db.prepare("UPDATE bots SET engine='primary', engine_port=NULL WHERE id=?").run(botId);
     return 'primary';
   }
