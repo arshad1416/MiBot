@@ -3,6 +3,7 @@ import type { Bot, EngineInfo, EngineProvider } from '@shared/types';
 import { useConfigUI } from '../configStore';
 import { configApi } from '../lib/configApi';
 import { useStore } from '../store';
+import { Switch } from './config/ui';
 import { Icon } from './Icon';
 
 const KIND: Record<EngineProvider['kind'], string> = { subscription: 'Subscription', api_key: 'API key' };
@@ -117,6 +118,14 @@ export function EngineSettings({ bot }: { bot: Bot }) {
     finally { setBusy(null); }
   };
 
+  const setAuto = async (on: boolean) => {
+    setNote(null);
+    try {
+      await configApi.updateBot(botId, { autoModel: on });
+      useStore.setState((s) => ({ bots: s.bots.map((b) => (b.id === botId ? { ...b, autoModel: on } : b)) }));
+    } catch (e) { setNote(`Couldn’t switch Auto: ${(e as Error).message || 'the server did not answer'}`); }
+  };
+
   const restart = async () => {
     if (busy) return;
     setBusy('restart'); setNote(null);
@@ -135,6 +144,16 @@ export function EngineSettings({ bot }: { bot: Bot }) {
 
   return (
     <div className="panel-card engine">
+      <div className="panel-row panel-row--setting">
+        <span>Auto</span>
+        <Switch on={bot.autoModel} label={`Choose a model for each of ${bot.name}’s jobs`} onChange={setAuto} />
+      </div>
+      {bot.autoModel && (
+        <div className="engine__notice engine__notice--top">
+          <span>Each job gets a model from your list. The provider and model below are used when that choice is unsure.</span>
+          <button type="button" className="link-btn link-btn--small" onClick={() => useConfigUI.getState().openAppSettings('models')}>Models to choose from</button>
+        </div>
+      )}
       <div className="panel-row panel-row--setting">
         <span>Provider</span>
         <span className="mini-select mini-select--native engine__select">

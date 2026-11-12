@@ -3,6 +3,7 @@ import type { ModelAccessInfo, ModelEndpoint } from '@shared/types';
 import { configApi, type EndpointDraft } from '../../lib/configApi';
 import { useConfigUI } from '../../configStore';
 import { useStore } from '../../store';
+import { AutoModels } from './AutoModels';
 import { ConfirmButton, PageHead } from './ui';
 
 /** Routers and local servers that speak the OpenAI API, with the address each listens on when left as installed. */
@@ -15,7 +16,7 @@ const ENDPOINT_KINDS: { name: string; baseUrl: string }[] = [
 ];
 const NO_DRAFT: EndpointDraft = { name: '', baseUrl: '', key: '', models: '' };
 
-/** Settings › Models: subscriptions, API keys and the person's own endpoints, added once for every Bot. */
+/** Settings › Models: subscriptions, API keys and the person's own endpoints, added once for every Bot, and the models Auto chooses from. */
 export function ModelsSection() {
   const [data, setData] = useState<ModelAccessInfo | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -65,7 +66,7 @@ export function ModelsSection() {
 
   return (
     <>
-      <PageHead title="Models" sub="Where your Bots get their models. Add a subscription, a key or an endpoint here once and every Bot can use it. Each Bot’s own provider and model are chosen in its panel, under Engine." />
+      <PageHead title="Models" sub="Where your Bots get their models. Add a subscription, a key or an endpoint here once and every Bot can use it. Each Bot’s own provider and model are chosen in its panel, under Engine, or left to Auto." />
       {note && <div className="cfg-error" role="alert">{note}</div>}
 
       <section className="cfg-section">
@@ -141,7 +142,7 @@ export function ModelsSection() {
           )}
           <input className={`text-input${editing ? ' model-add__wide' : ''}`} value={draft.name} maxLength={60} placeholder="Name" aria-label="Endpoint name" disabled={editing} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           <input className="text-input model-add__wide" value={draft.baseUrl} spellCheck={false} placeholder="Address, for example http://localhost:20128/v1" aria-label="Endpoint address" onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} />
-          <input className="text-input model-add__wide" value={draft.models} spellCheck={false} placeholder="Model ids, separated by commas (optional)" aria-label="Model ids" onChange={(e) => setDraft({ ...draft, models: e.target.value })} />
+          <input className="text-input model-add__wide" value={draft.models} spellCheck={false} placeholder="Model ids, separated by commas (optional)" aria-label="Endpoint model ids" onChange={(e) => setDraft({ ...draft, models: e.target.value })} />
           <input className="text-input model-add__wide" type="password" autoComplete="off" spellCheck={false} value={draft.key} placeholder={editing ? 'API key (empty keeps the one it has)' : 'API key (if it needs one)'} aria-label="Endpoint API key" onChange={(e) => setDraft({ ...draft, key: e.target.value })} />
           <button type="button" className="cfg-btn cfg-btn--primary" disabled={!draft.name.trim() || !draft.baseUrl.trim() || busy === 'endpoint'} onClick={saveEndpoint}>{busy === 'endpoint' ? 'Saving…' : editing ? 'Save changes' : 'Add endpoint'}</button>
           {editing && <button type="button" className="cfg-btn cfg-btn--secondary" onClick={() => setDraft(NO_DRAFT)}>Cancel</button>}
@@ -150,6 +151,8 @@ export function ModelsSection() {
           For 9Router, OmniRoute and anything else that speaks the OpenAI API. An address with <code className="cfg-code">localhost</code> means the machine a Bot’s job runs on, so use the machine’s network name when the router runs on one machine only. Model ids are the names the endpoint uses; the first is the one a Bot starts with.
         </div>
       </section>
+
+      <AutoModels />
     </>
   );
 }

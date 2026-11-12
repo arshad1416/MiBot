@@ -1,7 +1,7 @@
 import { db, now } from './db.js';
 import { newId } from './lib/ids.js';
 import { HUB } from './machines.js';
-import type { JobInfo, JobWeight, RowBody } from './types.js';
+import type { JobChoice, JobInfo, JobWeight, RecentChoice, RowBody } from './types.js';
 
 /**
  * The queue, on disk.
@@ -22,11 +22,17 @@ export interface JobRow {
   /** First row this job wrote. */
   start_seq: number | null;
   generation: number; note: string | null; created_at: number; started_at: number | null; finished_at: number | null;
+  /** What Auto chose for this job (a JobChoice as JSON), when its bot is on Auto. */
+  choice: string | null;
 }
 
 const OPEN = "('queued','waiting','running','paused')";
 
 export const getJob = (id: string) => db.prepare('SELECT * FROM jobs WHERE id=?').get(id) as JobRow | undefined;
+
+export function choiceOf(job: Pick<JobRow, 'choice'>): JobChoice | null {
+  try { return job.choice ? JSON.parse(job.choice) : null; } catch { return null; }
+}
 
 export function createJob(botId: string, trigger: { type: string }): JobRow {
   const b = db.prepare('SELECT weight, generation, next_seq FROM bots WHERE id=?').get(botId) as any;
@@ -68,8 +74,18 @@ export function openJobs(userId: string): JobInfo[] {
   const rows = db.prepare(`SELECT j.*, b.name bot_name FROM jobs j JOIN bots b ON b.id=j.bot_id WHERE b.user_id=? AND j.status IN ${OPEN} ORDER BY j.created_at ASC`).all(userId) as (JobRow & { bot_name: string })[];
   return rows.map((j) => ({
     id: j.id, botId: j.bot_id, botName: j.bot_name, title: titleOf(j.trigger), weight: j.weight,
-    status: j.status as JobInfo['status'], machineId: j.machine_id, note: j.note, createdAt: j.created_at,
+    status: j.status as JobInfo['status'], machineId: j.machine_id, note: j.note, choice: choiceOf(j), createdAt: j.created_at,
   }));
+}
+
+/** The jobs Auto chose a model for, newest first. */
+export function recentChoices(userId: string, limit = 20): RecentChoice[] {
+  const rows = db.prepare(`SELECT j.id, j.trigger, j.choice, j.created_at, b.name bot_name, m.name machine_name FROM jobs j JOIN bots b ON b.id=j.bot_id LEFT JOIN machines m ON m.id=j.machine_id
+    WHERE b.user_id=? AND j.choice IS NOT NULL ORDER BY j.created_at DESC LIMIT ?`).all(userId, limit) as { id: string; trigger: string; choice: string; created_at: number; bot_name: string; machine_name: string | null }[];
+  return rows.flatMap((j) => {
+    const choice = choiceOf(j);
+    return choice ? [{ jobId: j.id, botName: j.bot_name, title: titleOf(j.trigger), at: j.created_at, machineName: j.machine_name, choice }] : [];
+  });
 }
 
 // ---------- what a machine's agent has seen of a conversation ----------

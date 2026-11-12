@@ -9,8 +9,9 @@ import { screenForWork } from '../computer.js';
 import { assignEngine, engineFor, engineKind, mcpToken, soulFor } from '../engine.js';
 import { readMemoryFiles, writeMemoryFiles } from '../engine-memory.js';
 import { accessFor } from '../modelAccess.js';
-import { createJob, getJob, markSeen, noteHubHistory, pruneJobs, setJob, unfinishedJobs, unseenDigest, type JobRow } from '../jobs.js';
+import { choiceOf, createJob, getJob, markSeen, noteHubHistory, pruneJobs, setJob, unfinishedJobs, unseenDigest, type JobRow } from '../jobs.js';
 import { HUB, endRemote, machineRow, machinesChanged, nextChange, nextItem, place, pullRemote, startRemote, type MachineRow } from '../machines.js';
+import { choiceLine, chooseFor } from '../routing.js';
 import { instructionsFor } from './prompt.js';
 import { activityFor, appToolName, humanizeSlug, policyFor } from './tools.js';
 
@@ -336,6 +337,9 @@ const TOOLBOX = new Set(['tool_search', 'tool_describe']);
 /** A job that keeps losing its machine is given up on after this many starts. */
 const MAX_ATTEMPTS = 5;
 
+/** The bot is the Hermes agent that already runs on the hub, so its jobs run there. */
+const livesOnHub = (botId: string) => (engineKind(botId) ?? assignEngine(botId)) === 'primary';
+
 /** Wait until a machine can take the job, saying in the conversation's status line what it is waiting for. */
 async function machineFor(job: JobRow, signal: AbortSignal): Promise<MachineRow> {
   const botId = job.bot_id;
@@ -343,11 +347,14 @@ async function machineFor(job: JobRow, signal: AbortSignal): Promise<MachineRow>
   let said = '';
   for (;;) {
     const j = getJob(job.id)!;
+    const choice = choiceOf(j);
     const p = place({
       userId, weight: j.weight,
       // A job that already started stays with its machine (its agent holds the thread) unless the user moved it.
       pin: j.move_to ?? (j.attempts > 0 ? j.machine_id : null),
-      hubOnly: (engineKind(botId) ?? assignEngine(botId)) === 'primary',
+      hubOnly: livesOnHub(botId),
+      only: choice?.runsOn.length ? { ids: choice.runsOn, model: choice.label ?? 'its model' } : null,
+      prefer: choice?.machineId,
     });
     if ('machine' in p) return p.machine;
     if (p.wait !== said) {
@@ -378,9 +385,12 @@ async function requestFor(job: JobRow, trigger: Trigger, machine: MachineRow): P
     input = `[Note: the user took control of your screen for a while and has just handed it back. Look at the screen before you rely on what was there.]\n\n${input}`;
     db.prepare('UPDATE bots SET handback_at=NULL WHERE id=?').run(botId);
   }
+  // What Auto chose for this job goes before the bot's own model.
+  const choice = choiceOf(job);
+  const provider = choice?.model ? choice.provider : bot.provider;
   return {
-    model: bot.model || 'hermes-agent',
-    ...(bot.provider ? { provider: bot.provider } : {}),
+    model: choice?.model || bot.model || 'hermes-agent',
+    ...(provider ? { provider } : {}),
     input,
     instructions: await instructionsFor(bot.user_id, botId, machine.id === HUB ? undefined : machine.name),
     // One engine-side thread per conversation; "New chat" bumps the generation and starts another.
@@ -437,6 +447,8 @@ async function* turnEvents(job: JobRow, trigger: Trigger, t: { signal: AbortSign
   for (;;) {
     const machine = await machineFor(job, t.signal);
     if (job.attempts >= MAX_ATTEMPTS) throw new Error('this job was interrupted too many times');
+    const choice = job.attempts === 0 ? choiceOf(job) : null;
+    if (choice) appendRow(botId, 'notice', { type: 'notice', text: choiceLine(choice, getBotRow(botId).name, machine.name), tone: 'info' });
     noteHubHistory(job);
     setJob(job.id, {
       status: 'running', machine_id: machine.id, attempts: job.attempts + 1, note: null,
@@ -550,6 +562,12 @@ async function runTurn(job: JobRow, trigger: Trigger) {
   };
 
   try {
+    // A bot on Auto has its model, size and machine chosen once, before the job first looks for a machine.
+    if (bot.auto_model && job.attempts === 0 && !job.choice) {
+      setLive(botId, { caption: 'Choosing a model' });
+      if (await chooseFor(job, trigger.type === 'routine' ? trigger.prompt : trigger.text, livesOnHub(botId), ctrl.signal)) job = getJob(job.id)!;
+      setLive(botId, { caption: null });
+    }
     for await (const ev of turnEvents(job, trigger, { signal: ctrl.signal, onBreak })) {
       const d = ev.data;
       switch (ev.type) {

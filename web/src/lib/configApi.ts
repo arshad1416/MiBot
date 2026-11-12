@@ -1,4 +1,4 @@
-import type { Bot, ComputerState, EngineInfo, JobInfo, LibraryFile, Machine, Memory, ModelAccessInfo, Routine, Skill, Task, Toolkit } from '@shared/types';
+import type { AutoInfo, Bot, ComputerState, EngineInfo, JobInfo, LibraryFile, Machine, Memory, ModelAccessInfo, RosterModel, Routine, Skill, Task, Toolkit } from '@shared/types';
 import { ApiError } from './api';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -32,7 +32,7 @@ export interface ComputerDetails {
   hibernation: { idleMinutes: number; viewers: number; dryRun: boolean };
 }
 
-export type BotPatch = Partial<Pick<Bot, 'name' | 'label' | 'description' | 'instructions' | 'avatarShape' | 'avatarColor' | 'effort' | 'mode' | 'weight'>>;
+export type BotPatch = Partial<Pick<Bot, 'name' | 'label' | 'description' | 'instructions' | 'avatarShape' | 'avatarColor' | 'effort' | 'mode' | 'weight' | 'autoModel'>>;
 
 export interface MachinesBundle { machines: Machine[]; jobs: JobInfo[] }
 export type MachinePatch = Partial<Pick<Machine, 'name' | 'takes' | 'rank' | 'enabled'>>;
@@ -42,6 +42,8 @@ export interface PairStatus { state: 'open' | 'used' | 'expired'; expiresInMs: n
 
 /** An endpoint as typed in Settings. With `id` it changes that endpoint, and an empty key keeps the one it has. */
 export interface EndpointDraft { id?: string; name: string; baseUrl: string; key: string; models: string }
+/** A model for Auto's list as typed in Settings. With `id` it changes that model. */
+export type RosterDraft = Omit<RosterModel, 'id'> & { id?: string };
 
 export const configApi = {
   settings: (botId: string) => req<BotSettingsBundle>('GET', `/bots/${botId}/settings`),
@@ -88,6 +90,11 @@ export const configApi = {
   removeModelEndpoint: (id: string) => req<ModelAccessInfo>('DELETE', `/models/endpoints/${id}`),
   /** Opens a subscription's sign-in on one Bot's screen, for every Bot. Says which Bot's screen. */
   modelSignIn: (provider: string) => req<{ botId: string }>('POST', '/models/sign-in', { provider }),
+  /** The models Auto chooses from for each job, and what it chose lately. */
+  autoModels: () => req<AutoInfo>('GET', '/models/auto'),
+  saveAuto: (minConfidence: number) => req<AutoInfo>('PUT', '/models/auto', { minConfidence }),
+  saveRosterModel: (m: RosterDraft) => req<AutoInfo>('POST', '/models/roster', m),
+  removeRosterModel: (id: string) => req<AutoInfo>('DELETE', `/models/roster/${id}`),
 
   machines: () => req<MachinesBundle>('GET', '/machines'),
   /** A code for a new machine (named `name`, or after itself when that is empty), or for signing another browser in. */

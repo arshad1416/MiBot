@@ -187,7 +187,7 @@ export function MachinesSection() {
                 <div className="cfg-row__text">
                   <div className="cfg-row__title">{j.botName} · {j.title}</div>
                   <div className="cfg-row__sub">
-                    {j.note ?? `${JOB_STATUS[j.status]}${j.status === 'running' && j.machineId ? ` on ${byId.get(j.machineId)?.name ?? 'a machine'}` : ''}`} · {j.weight} job
+                    {j.note ?? `${JOB_STATUS[j.status]}${j.status === 'running' && j.machineId ? ` on ${byId.get(j.machineId)?.name ?? 'a machine'}` : ''}`} · {j.weight} job{j.choice?.label ? ` · ${j.choice.label}` : ''}
                   </div>
                 </div>
                 {others.length > 0 && !(j.status === 'running' && j.machineId === 'hub') && (

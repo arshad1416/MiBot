@@ -33,6 +33,7 @@ export function toBot(r: any): Bot {
     voiceLanguage: r.voice_language ?? 'auto',
     model: r.model ?? null,
     provider: r.provider ?? null,
+    autoModel: !!r.auto_model,
     weight: r.weight === 'light' ? 'light' : 'heavy',
     generation: r.generation,
     unread: r.unread,

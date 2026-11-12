@@ -6,12 +6,16 @@ import { box } from './box.js';
 import { readyScreen } from './computer.js';
 import { openTerminal } from './desk.js';
 import { applyAccess, knownProviders, signInCommand, signInsChangedAt, spreadSignIn } from './engine.js';
+import { recentChoices } from './jobs.js';
+import { listMachines } from './machines.js';
 import { KEY_PROVIDERS, listEndpoints, removeAccess, saveEndpoint, savedKeys, saveKey, SUBSCRIPTIONS } from './modelAccess.js';
-import type { ModelAccessInfo } from './types.js';
+import { autoBlocked, listRoster, minConfidence, removeRosterModel, saveRosterModel, setMinConfidence } from './routing.js';
+import type { AutoInfo, ModelAccessInfo } from './types.js';
 
 /**
  * Settings › Models: API keys, endpoints of the person's own and subscription sign-ins, added once
- * for all of their Bots. Mounted at /api/models in index.ts.
+ * for all of their Bots, and the models Auto chooses from for each job (routing.ts). Mounted at
+ * /api/models in index.ts.
  */
 export const modelsApi = new Hono<AuthVars>();
 modelsApi.use('*', requireUser);
@@ -117,4 +121,39 @@ modelsApi.post('/sign-in', async (c) => {
   }
   handOnSignIn(userId, sub.id, before);
   return c.json({ botId: bot.id });
+});
+
+// ---------- Auto: the models a job's model is chosen from ----------
+
+async function autoInfo(userId: string): Promise<AutoInfo> {
+  return {
+    roster: listRoster(userId),
+    minConfidence: minConfidence(userId),
+    blocked: autoBlocked(userId),
+    providers: await knownProviders(userId),
+    machines: listMachines(userId).map((m) => ({ id: m.id, name: m.name })),
+    recent: recentChoices(userId),
+  };
+}
+
+modelsApi.get('/auto', async (c) => c.json(await autoInfo(c.get('user').id)));
+
+modelsApi.put('/auto', async (c) => {
+  const userId = c.get('user').id;
+  const { minConfidence: value } = await c.req.json<{ minConfidence?: unknown }>().catch(() => ({} as { minConfidence?: unknown }));
+  try { setMinConfidence(userId, value); } catch (e) { return c.json({ error: fail(e) }, 400); }
+  return c.json(await autoInfo(userId));
+});
+
+modelsApi.post('/roster', async (c) => {
+  const userId = c.get('user').id;
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+  try { saveRosterModel(userId, body); } catch (e) { return c.json({ error: fail(e) }, 400); }
+  return c.json(await autoInfo(userId));
+});
+
+modelsApi.delete('/roster/:id', async (c) => {
+  const userId = c.get('user').id;
+  if (!removeRosterModel(userId, c.req.param('id'))) return c.json({ error: 'not found' }, 404);
+  return c.json(await autoInfo(userId));
 });

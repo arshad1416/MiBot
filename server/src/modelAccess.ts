@@ -73,6 +73,12 @@ function upsert(userId: string, slug: string, kind: 'key' | 'endpoint', name: st
 /** The ids of the providers this person has saved a key for. */
 export const savedKeys = (userId: string): string[] => rows(userId).filter((r) => r.kind === 'key').map((r) => r.slug);
 
+/** The key this person saved for a provider, for calls this server makes itself. It never leaves the server. */
+export function savedKey(userId: string, providerId: string): string | null {
+  const r = row(userId, providerId);
+  return r?.kind === 'key' ? box.open(r.secret).key ?? null : null;
+}
+
 export function saveKey(userId: string, providerId: string, key: unknown) {
   const p = KEY_PROVIDERS.find((k) => k.id === providerId);
   if (!p) throw new Error('That provider is not one a key can be added for.');

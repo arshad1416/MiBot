@@ -162,6 +162,10 @@ export interface JobAsk {
   pin: string | null;
   /** The bot is the machine's own Hermes agent, which lives on the hub. */
   hubOnly: boolean;
+  /** The job's model runs on these machines only (Auto chose it; see routing.ts). */
+  only?: { ids: string[]; model: string } | null;
+  /** The machine to use when it is one of those free to take the job. */
+  prefer?: string | null;
 }
 
 const names = (ms: MachineRow[]) => ms.map((m) => m.name).join(' or ');
@@ -172,7 +176,14 @@ export function place(ask: JobAsk): { machine: MachineRow } | { wait: string } {
   const pinned = ask.pin ? able.find((m) => m.id === ask.pin) : undefined;
   if (ask.hubOnly) able = able.filter((m) => m.id === HUB);
   else if (pinned) able = [pinned];
-  else able = able.filter((m) => m.takes === 'both' || m.takes === ask.weight);
+  else {
+    able = able.filter((m) => m.takes === 'both' || m.takes === ask.weight);
+    const only = ask.only;
+    if (only) {
+      able = able.filter((m) => only.ids.includes(m.id));
+      if (!able.length) return { wait: `No machine that has ${only.model} is set to take ${ask.weight} jobs` };
+    }
+  }
   if (!able.length) return { wait: ask.hubOnly ? `${machineRow(HUB)!.name} is switched off for jobs` : `No machine is set to take ${ask.weight} jobs` };
 
   const online = able.filter(isOnline);
@@ -182,8 +193,9 @@ export function place(ask: JobAsk): { machine: MachineRow } | { wait: string } {
     const why = infoOf(online[0]).reason;
     return { wait: why ? `${online[0].name} is not taking jobs: ${why}` : `${names(online)} is not taking jobs right now` };
   }
-  const free = open.find((m) => { const s = slotsOf(m); return s === 0 || runningOn(m.id) < s; });
-  return free ? { machine: free } : { wait: `${names(open)} is busy with another job` };
+  const free = open.filter((m) => { const s = slotsOf(m); return s === 0 || runningOn(m.id) < s; });
+  const machine = free.find((m) => m.id === ask.prefer) ?? free[0];
+  return machine ? { machine } : { wait: `${names(open)} is busy with another job` };
 }
 
 // ---------- a job running on another machine ----------

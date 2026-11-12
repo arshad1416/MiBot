@@ -41,6 +41,9 @@ A job that is interrupted five times is given up on.
 - **Not the first Bot.** It is the Hermes agent that already runs on the hub, so its jobs always
   run there. On a hub with no agent of its own to keep (`HERMES_URL=` left empty in `.env`), the
   first Bot is like the others and can run anywhere.
+- **Auto.** A Bot with Auto switched on has its job's size, and the machine it would rather run on,
+  chosen for each job along with its model (README, "Auto"). A model set to run on certain machines
+  only waits for one of those; moving the job by hand overrides that.
 - **Subscription sign-ins are per machine.** An agent started by a worker inherits model settings and
   sign-ins from that machine's own `~/.hermes`, the same way the hub's Bots do. API keys and
   endpoints added under **Settings › Models** travel with each job, so they work on every machine.

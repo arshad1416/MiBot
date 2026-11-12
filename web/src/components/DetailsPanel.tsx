@@ -85,7 +85,9 @@ export function DetailsPanel() {
               <div className="details__who-text">
                 <div className="details__who-head">
                   <span className="details__who-name" title={displayName(bot)}>{displayName(bot)}</span>
-                  {bot.model && <span className="details__model" title={bot.provider ? `${bot.provider} · ${bot.model}` : bot.model}>{bot.model}</span>}
+                  {bot.autoModel
+                    ? <span className="details__model" title="A model is chosen for each job">Auto</span>
+                    : bot.model && <span className="details__model" title={bot.provider ? `${bot.provider} · ${bot.model}` : bot.model}>{bot.model}</span>}
                 </div>
                 <div className="details__who-sub">Computer {computerStatusText(computer).toLowerCase()}</div>
               </div>

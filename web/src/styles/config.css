@@ -233,6 +233,12 @@
 @media (max-width: 640px) { .model-add { grid-template-columns: minmax(0, 1fr); } }
 .model-add .cfg-btn { justify-self: start; }
 select.text-input.model-add__pick { width: auto; height: 32px; padding: 0 8px; flex: 0 0 auto; }
+.model-add select.text-input { padding: 0 8px; }
+.model-add textarea.text-input { height: auto; }
+.cfg-note { padding: 8px 10px; border-radius: 8px; background: var(--color-warn-bg); color: var(--color-warn-text); font-size: 13px; line-height: 18px; }
+.auto-machines { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; line-height: 18px; color: var(--color-text-secondary); }
+.auto-machines label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.auto-machines__any { color: var(--color-text-tertiary); }
 select.text-input.machine-move { width: auto; max-width: 150px; height: 30px; padding: 0 8px; flex: 0 0 auto; }
 /* The one-time code that adds a device: QR code on the left, the letters and what to do with them on the right. */
 .pair-card { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; padding: 16px; border-radius: 12px; background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); }

@@ -31,6 +31,8 @@ export interface Bot {
   /** Hermes engine: model id and provider for this bot; null = the engine's default. */
   model: string | null;
   provider: string | null;
+  /** Auto: a model from the person's list (Settings › Models) is chosen for each of this bot's jobs; `model` and `provider` are what it falls back to. */
+  autoModel: boolean;
   /** How big this bot's jobs are: a 'light' job may run on a small machine, a 'heavy' one only where heavy jobs are taken. */
   weight: JobWeight;
   generation: number;
@@ -212,7 +214,56 @@ export interface JobInfo {
   status: 'queued' | 'waiting' | 'running' | 'paused';
   machineId: string | null;
   note: string | null;
+  /** What Auto chose for it, when its bot is on Auto. */
+  choice: JobChoice | null;
   createdAt: number;
+}
+
+/** A model Auto can choose for a job, with the notes the choice is made from. */
+export interface RosterModel {
+  id: string;
+  label: string;
+  provider: string;
+  model: string;
+  /** What it is good and bad at, in the person's own words. */
+  note: string;
+  /** The machines that can run it, by id; empty = any machine. */
+  machines: string[];
+}
+
+/** What Auto decided for one job. */
+export interface JobChoice {
+  /** 'jev' = Jev chose the model; 'bot' = the Bot's own model is used, because Jev was unsure or could not be asked. */
+  by: 'jev' | 'bot';
+  /** The chosen model; all null when the Bot's own is used. */
+  label: string | null;
+  provider: string | null;
+  model: string | null;
+  weight: JobWeight;
+  /** The machine Jev would run it on, when it named one that can. */
+  machineId: string | null;
+  /** The machines the chosen model runs on; empty = any. */
+  runsOn: string[];
+  /** How sure Jev was of the model, 0 to 1. */
+  confidence: number | null;
+  /** One line for the person. */
+  why: string;
+}
+
+/** A job Auto chose for, newest first in Settings › Models. */
+export interface RecentChoice { jobId: string; botName: string; title: string; at: number; machineName: string | null; choice: JobChoice }
+
+/** Settings › Models, the Auto part: the models to choose from and how the choosing has gone. */
+export interface AutoInfo {
+  roster: RosterModel[];
+  /** How sure Jev has to be of a choice (0 to 1) before it is used. */
+  minConfidence: number;
+  /** Why Jev cannot be asked right now, or null. */
+  blocked: string | null;
+  /** The providers a model can come from, as the Bots' agents report them. Empty while no agent is up. */
+  providers: EngineProvider[];
+  machines: { id: string; name: string }[];
+  recent: RecentChoice[];
 }
 
 export interface LibraryFile { name: string; size: number; modifiedAt: number; isDir: boolean }

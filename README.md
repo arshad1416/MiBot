@@ -169,6 +169,12 @@ The keys you need:
 
 Keys and endpoints reach Bots on every machine from their next message. A sign-in stays on the machine it was made on. Which provider and model one Bot uses is chosen in its details panel, under **Engine**.
 
+### Auto
+
+Switch **Auto** on in a Bot's Engine section and each of its jobs gets its own model. The models to choose from are listed under **Settings › Models › Auto**, each with a note on what it is good and bad at and, where a model needs a sign-in only some machines have, the machines it runs on.
+
+For each new job the server asks Jev, TypeSafe's small decision model (`typesafe/jev-1.14`), through OpenRouter (it uses the OpenRouter key from the same page). Jev reads the job and the notes and answers three questions, each with how sure it is: which model, whether the job is light or heavy, and which machine. An answer it is less sure of than the level set on that page is not used, and the Bot's own model and job size apply. So does a job when Jev cannot be reached. What was chosen and why is written into the conversation when the job starts and listed under **Latest choices**.
+
 ## Development
 
 ```bash
