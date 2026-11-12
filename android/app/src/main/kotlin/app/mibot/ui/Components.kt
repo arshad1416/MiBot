@@ -251,6 +251,7 @@ fun MiTextField(
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     textStyle: TextStyle = Type.body,
     leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(if (singleLine) 50 else 12)
     BasicTextField(
@@ -276,6 +277,10 @@ fun MiTextField(
                 Box(Modifier.weight(1f)) {
                     if (value.isEmpty()) Text(placeholder, style = textStyle, color = Mi.colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     inner()
+                }
+                if (trailing != null) {
+                    Spacer(Modifier.width(10.dp))
+                    trailing()
                 }
             }
         },

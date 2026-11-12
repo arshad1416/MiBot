@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -14,6 +15,7 @@ import app.mibot.MainActivity
 import app.mibot.MiBotApp
 import app.mibot.R
 import app.mibot.core.Notice
+import app.mibot.ui.avatarBitmap
 
 /** Says on the phone what a bot would otherwise only say in its chat: it finished, or it is waiting for you. */
 class Notifier(private val app: MiBotApp) {
@@ -47,8 +49,10 @@ class Notifier(private val app: MiBotApp) {
             is Notice.Finished -> notice.preview
             is Notice.Waiting -> "Waiting for you: ${notice.reason}"
         }
+        val dark = (app.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         val n = NotificationCompat.Builder(app, BOTS)
             .setSmallIcon(R.drawable.ic_stat_bot)
+            .setLargeIcon(avatarBitmap(bot.avatarShape, bot.avatarColor, dark, LARGE_ICON_PX))
             .setContentTitle(bot.name)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -77,5 +81,6 @@ class Notifier(private val app: MiBotApp) {
     private companion object {
         const val BOTS = "bots"
         const val LINE = "connection"
+        const val LARGE_ICON_PX = 192
     }
 }

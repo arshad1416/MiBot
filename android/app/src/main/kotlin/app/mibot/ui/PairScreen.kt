@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -17,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,7 +44,7 @@ import kotlinx.coroutines.launch
 
 /**
  * The first screen: add this phone to a hub. The hub shows a QR code in Settings › Machines; scanning
- * it signs the phone in. The same can be done by typing the hub's address and the short code under the QR.
+ * it signs the phone in. The same can be done by typing the hub's address and the short code next to the QR.
  */
 @Composable
 fun PairScreen(onPaired: (HubAccount) -> Unit) {
@@ -53,6 +55,10 @@ fun PairScreen(onPaired: (HubAccount) -> Unit) {
     var code by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val scroll = rememberScrollState()
+    // With the keyboard up there is less room: keep the button under the fields in view.
+    val keyboard = WindowInsets.isImeVisible
+    LaunchedEffect(keyboard, scroll.maxValue) { if (keyboard) scroll.scrollTo(scroll.maxValue) }
 
     fun pair(hubUrl: String, pairCode: String) {
         if (busy) return
@@ -85,19 +91,20 @@ fun PairScreen(onPaired: (HubAccount) -> Unit) {
     }
 
     Column(
-        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 24.dp),
+        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding().verticalScroll(scroll).padding(horizontal = 28.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        BotAvatar("blob", "black", 132.dp, mood = Mood.Awake)
-        Spacer(Modifier.height(24.dp))
-        Text("MiBot", style = Type.display, color = Mi.colors.text)
+        BotAvatar("blob", "black", if (typing) 76.dp else 132.dp, mood = Mood.Awake)
+        Spacer(Modifier.height(if (typing) 14.dp else 24.dp))
+        Text("MiBot", style = if (typing) Type.title else Type.display, color = Mi.colors.text)
         Spacer(Modifier.height(10.dp))
         Text(
-            "Add this phone to your hub. On a computer where MiBot is open, go to Settings › Machines › Add a device, and scan the code it shows.",
-            style = Type.body, color = Mi.colors.textSecondary, textAlign = TextAlign.Center,
+            if (typing) "On a computer where MiBot is open, go to Settings › Machines › Add a device. It shows the code and your hub's address next to the QR."
+            else "Add this phone to your hub. On a computer where MiBot is open, go to Settings › Machines › Add a device, and scan the code it shows.",
+            style = if (typing) Type.small else Type.body, color = Mi.colors.textSecondary, textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(if (typing) 20.dp else 28.dp))
 
         if (!typing) {
             PillButton(if (busy) "Adding this phone…" else "Scan the code", ::scan, Modifier.fillMaxWidth(), enabled = !busy, icon = MiIcons.qr)
@@ -110,7 +117,7 @@ fun PairScreen(onPaired: (HubAccount) -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
             )
             Spacer(Modifier.height(16.dp))
-            FieldLabel("The code under the QR", Modifier.fillMaxWidth())
+            FieldLabel("The code next to the QR", Modifier.fillMaxWidth())
             val ready = address.isNotBlank() && code.length >= 4
             MiTextField(
                 code, { code = HubClient.normalizeCode(it) }, "ABCD2345",

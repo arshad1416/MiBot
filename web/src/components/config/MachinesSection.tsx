@@ -85,7 +85,7 @@ function PairCard({ pair, version, onUsed, onAgain, onDone }: { pair: PairCode; 
         <div className="pair-card__meta">Works once, for the next {clock(left)}</div>
         <ul className="pair-card__steps">
           <li><b>A computer that should run jobs:</b> open <code className="cfg-code">{SETUP_PAGE}</code> on it and type the code. Its hub address is <code className="cfg-code">{hub}</code>.</li>
-          <li><b>A phone or another browser:</b> scan the QR code to sign in there.</li>
+          <li><b>A phone or another browser:</b> scan the QR code, in the MiBot app or with the camera, to sign in there.</li>
         </ul>
         <div className="pair-card__actions">
           <a className="cfg-btn cfg-btn--secondary" href={setupPageLink(pair.hubUrl, pair.code)} target="_blank" rel="noreferrer" title="Opens this computer’s own setup page with the code filled in. Its worker has to be running.">Add this computer</a>

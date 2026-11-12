@@ -1,5 +1,8 @@
 package app.mibot.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -9,12 +12,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 
 /** The app's colours. One set for dark, one for light; which one is used follows the phone's setting. */
 @Immutable
@@ -121,12 +127,30 @@ fun botColors(name: String): BotColors {
     return BotColors(Color(c.fill), Color(c.bubble), Color.White, Color(c.action), Color.White)
 }
 
+/** The colour of a bot's body, for drawing outside Compose. */
+fun botFill(name: String, dark: Boolean): Color = NAMED[name]?.let { Color(it.fill) } ?: (if (dark) DarkPalette else LightPalette).primary
+
 /** True for a colour dark enough that light things drawn on it stand out. */
 val Color.isDark get() = luminance() < 0.35f
+
+private tailrec fun Context.activity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.activity()
+    else -> null
+}
 
 @Composable
 fun MiBotTheme(content: @Composable () -> Unit) {
     val p = if (isSystemInDarkTheme()) DarkPalette else LightPalette
+    // The clock and icons at the top of the phone: dark on the light theme, light on the dark one.
+    val view = LocalView.current
+    SideEffect {
+        val window = view.context.activity()?.window ?: return@SideEffect
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !p.dark
+            isAppearanceLightNavigationBars = !p.dark
+        }
+    }
     val scheme = if (p.dark) {
         darkColorScheme(
             primary = p.primary, onPrimary = p.onPrimary, background = p.bg, onBackground = p.text, surface = p.surface, onSurface = p.text,

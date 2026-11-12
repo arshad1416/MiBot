@@ -70,6 +70,7 @@ async function api(method, p, body) {
 }
 await api('POST', '/auth/dev', { email: 'dev@example.com' });
 const newCode = async () => console.log(`Code: ${(await api('POST', '/pair/codes', {})).code}   (works once, for ten minutes; Enter makes another)`);
+if (!fs.existsSync(path.join(repo, 'web', 'dist'))) console.log('The web app is not built here, so pages that open it will not load. `npm run build` builds it.');
 console.log(`A dev hub is running. In the app, choose "Type the code instead".\nAddress: ${url}`);
 await newCode();
 process.stdin.on('data', newCode);

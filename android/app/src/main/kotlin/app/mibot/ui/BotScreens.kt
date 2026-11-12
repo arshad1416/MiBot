@@ -10,7 +10,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -65,6 +66,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+
+/** How many characters the picker shows side by side. */
+private const val SHAPES_IN_A_ROW = 5
 
 /** The state of the bots' computer in a word or two. */
 private fun computerWord(c: ComputerState?): String = when (c?.status) {
@@ -209,17 +213,23 @@ fun EditBotScreen(botId: String?) {
             Spacer(Modifier.height(18.dp))
 
             FieldLabel("Shape")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (s in AVATAR_SHAPES.keys) {
-                    Box(Modifier.size(58.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.RadioButton) { shape = s }, contentAlignment = Alignment.Center) {
-                        BotAvatar(s, color, 46.dp, ring = s == shape)
+            Column(Modifier.widthIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (row in AVATAR_SHAPES.keys.chunked(SHAPES_IN_A_ROW)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (s in row) {
+                            Box(
+                                Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(16.dp)).clickable(role = Role.RadioButton) { shape = s },
+                                contentAlignment = Alignment.Center,
+                            ) { BotAvatar(s, color, 48.dp, ring = s == shape) }
+                        }
+                        repeat(SHAPES_IN_A_ROW - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
             Spacer(Modifier.height(18.dp))
 
             FieldLabel("Colour")
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (c in BOT_COLOR_NAMES) {
                     Box(
                         Modifier.size(40.dp).clip(CircleShape)
@@ -388,7 +398,13 @@ fun ComputerScreen(botId: String) {
                 Image(picture, contentDescription = "The bot's screen", contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().clip(shape).border(1.dp, Mi.colors.border, shape))
             } else {
                 Box(Modifier.fillMaxWidth().height(210.dp).clip(shape).background(Mi.colors.surface).border(1.dp, Mi.colors.border, shape), contentAlignment = Alignment.Center) {
-                    Text(if (running) "Waiting for a picture of the screen…" else "The computer is ${computerWord(computer).lowercase()}.", style = Type.body, color = Mi.colors.textSecondary)
+                    Text(
+                        when {
+                            running -> "Waiting for a picture of the screen…"
+                            computer?.status == "error" -> "The computer has a problem."
+                            else -> "The computer is ${computerWord(computer).lowercase()}."
+                        },
+                        style = Type.body, color = Mi.colors.textSecondary)
                 }
             }
             Spacer(Modifier.height(16.dp))

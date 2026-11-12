@@ -16,7 +16,7 @@ Without a cable, build the file and send it to the phone: `./gradlew :app:assemb
 
 ## Add the phone to your hub
 
-Open MiBot on a computer, go to **Settings › Machines › Add a device** and press **Add**. In the app, press **Scan the code** and point the phone at the QR code. Or choose **Type the code instead** and enter the hub's address and the short code under the QR. A code works once and lasts ten minutes.
+Open MiBot on a computer, go to **Settings › Machines › Add a device** and press **Add**. In the app, press **Scan the code** and point the phone at the QR code. Or choose **Type the code instead** and enter the hub's address and the short code, both shown next to the QR. A code works once and lasts ten minutes.
 
 The phone has to be able to reach the hub. For a hub at home that means the same network, or Tailscale on the phone.
 

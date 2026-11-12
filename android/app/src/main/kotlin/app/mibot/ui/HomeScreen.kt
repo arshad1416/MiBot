@@ -107,7 +107,18 @@ fun HomeScreen() {
         }
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            MiTextField(query, { query = it }, "Search", Modifier.weight(1f), leading = { MiIcon(MiIcons.search, 20.dp, Mi.colors.textTertiary) })
+            MiTextField(
+                query, { query = it }, "Search", Modifier.weight(1f),
+                leading = { MiIcon(MiIcons.search, 20.dp, Mi.colors.textTertiary) },
+                trailing = if (query.isEmpty()) null else {
+                    {
+                        Box(
+                            Modifier.size(24.dp).clip(CircleShape).clickable(role = Role.Button) { query = "" }.semantics { contentDescription = "Clear the search" },
+                            contentAlignment = Alignment.Center,
+                        ) { MiIcon(MiIcons.close, 16.dp, Mi.colors.textSecondary) }
+                    }
+                },
+            )
             Spacer(Modifier.width(10.dp))
             CircleButton(MiIcons.apps, "Connect apps", { nav.go(Dest.Apps(null)) }, size = 52.dp)
         }

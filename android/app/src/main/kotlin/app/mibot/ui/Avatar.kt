@@ -1,5 +1,7 @@
 package app.mibot.ui
 
+import android.graphics.Bitmap
+import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -25,8 +27,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
@@ -128,6 +132,26 @@ fun BotAvatar(shape: String, color: String, size: Dp, modifier: Modifier = Modif
 @Composable
 fun BotAvatar(bot: Bot, size: Dp, modifier: Modifier = Modifier, mood: Mood = Mood.Still, star: Boolean = false) =
     BotAvatar(bot.avatarShape, bot.avatarColor, size, modifier, mood, star)
+
+/** A bot's character as a still picture `px` wide, for where Compose does not draw: a notification. Main thread only. */
+fun avatarBitmap(shape: String, color: String, dark: Boolean, px: Int): Bitmap {
+    val def = AVATAR_SHAPES[shape] ?: AVATAR_SHAPES.getValue("blob")
+    val fill = botFill(color, dark)
+    val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    canvas.scale(px / 100f, px / 100f)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    paint.color = fill.toArgb()
+    canvas.drawPath(svgPath(def.body).asAndroidPath(), paint)
+    val s = def.faceSize
+    val w = AvatarFace.WIDTH * s
+    val h = AvatarFace.HEIGHT * s
+    paint.color = (if (fill.isDark) VISOR_LIGHT else VISOR_DARK).toArgb()
+    canvas.drawRoundRect(def.faceX - w / 2, def.faceY - h / 2, def.faceX + w / 2, def.faceY + h / 2, h / 2, h / 2, paint)
+    paint.color = (if (fill.isDark) VISOR_DARK else Color.White).toArgb()
+    for (side in intArrayOf(-1, 1)) canvas.drawCircle(def.faceX + side * AvatarFace.EYE_GAP * s, def.faceY, AvatarFace.EYE_RADIUS * s, paint)
+    return bitmap
+}
 
 /** A dot that breathes, for "something is happening here". */
 @Composable

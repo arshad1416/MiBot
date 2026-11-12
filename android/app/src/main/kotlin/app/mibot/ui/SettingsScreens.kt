@@ -4,11 +4,15 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.os.Build
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -239,35 +243,56 @@ fun WebScreen(title: String, path: String) {
     val nav = LocalNav.current
     var view by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
     BackHandler(enabled = canGoBack) { view?.goBack() }
 
     Screen(title, { nav.back() }) {
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
-            factory = { context ->
-                val address = hub.client.url(path)
-                CookieManager.getInstance().apply {
-                    setAcceptCookie(true)
-                    setCookie(address, "${hub.client.cookie}; Path=/")
-                }
-                WebView(context).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    // The web app is laid out for a wide screen: show all of it, and let the person zoom.
-                    settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
-                    settings.builtInZoomControls = true
-                    settings.displayZoomControls = false
-                    webViewClient = object : WebViewClient() {
-                        override fun doUpdateVisitedHistory(web: WebView, url: String?, isReload: Boolean) {
-                            canGoBack = web.canGoBack()
-                        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize().imePadding(),
+                factory = { context ->
+                    val address = hub.client.url(path)
+                    CookieManager.getInstance().apply {
+                        setAcceptCookie(true)
+                        setCookie(address, "${hub.client.cookie}; Path=/")
                     }
-                    loadUrl(address)
-                    view = this
+                    WebView(context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        // The web app is laid out for a wide screen: show all of it, and let the person zoom.
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        settings.builtInZoomControls = true
+                        settings.displayZoomControls = false
+                        webViewClient = object : WebViewClient() {
+                            override fun doUpdateVisitedHistory(web: WebView, url: String?, isReload: Boolean) {
+                                canGoBack = web.canGoBack()
+                            }
+
+                            override fun onReceivedError(web: WebView, request: WebResourceRequest, error: WebResourceError) {
+                                if (request.isForMainFrame) failed = true
+                            }
+
+                            override fun onReceivedHttpError(web: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                                if (request.isForMainFrame) failed = true
+                            }
+                        }
+                        loadUrl(address)
+                        view = this
+                    }
+                },
+                onRelease = { it.destroy() },
+            )
+            if (failed) {
+                Column(
+                    Modifier.fillMaxSize().background(Mi.colors.bg).padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    Text("This page did not open. Your hub may be out of reach from here.", style = Type.body, color = Mi.colors.textSecondary, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(16.dp))
+                    PillButton("Try again", { failed = false; view?.reload() }, primary = false)
                 }
-            },
-            onRelease = { it.destroy() },
-        )
+            }
+        }
     }
 }
