@@ -198,7 +198,8 @@ export function Transcript({ bot, rows, live, loaded }: Props) {
   const waiting = isWaitingForYou(live);
   const last = rows[rows.length - 1];
   const streamingNow = last?.body.type === 'message' && last.body.role === 'assistant' && !!last.body.streaming;
-  const showActivity = (running && !streamingNow) || waiting;
+  // The thinking block is pinned under the header, so it stays in view however far the turn scrolls.
+  const dock = !!live && ((running && !streamingNow) || waiting);
 
   // The chip that is still growing: the last thing in the transcript while the turn runs.
   const lastItem = items[items.length - 1];
@@ -242,7 +243,12 @@ export function Transcript({ bot, rows, live, loaded }: Props) {
   };
 
   return (
-    <div className="transcript-wrap">
+    <div className={`transcript-wrap${dock ? ' has-dock' : ''}`}>
+      {dock && (
+        <div className="thinking-dock">
+          <div className="thinking-dock__col"><ThinkingBlock bot={bot} live={live} rows={rows} steps={openKey ? 0 : serverSteps} /></div>
+        </div>
+      )}
     <div className="transcript" ref={scrollRef} onScroll={onScroll}>
       <div className="transcript__col">
         {loaded && rows.length === 0 && <EmptyChat bot={bot} />}
@@ -265,7 +271,6 @@ export function Transcript({ bot, rows, live, loaded }: Props) {
               );
           }
         })}
-        {showActivity && live && <ThinkingBlock bot={bot} live={live} rows={rows} steps={openKey ? 0 : serverSteps} />}
       </div>
     </div>
       {showJump && (
