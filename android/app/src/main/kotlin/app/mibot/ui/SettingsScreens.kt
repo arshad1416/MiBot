@@ -3,6 +3,7 @@ package app.mibot.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.os.Build
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -281,6 +282,8 @@ fun WebScreen(title: String, path: String) {
                         view = this
                     }
                 },
+                // Under the note below, the page that failed is still there: keep a screen reader from reading it.
+                update = { it.importantForAccessibility = if (failed) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO },
                 onRelease = { it.destroy() },
             )
             if (failed) {
