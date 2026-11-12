@@ -17,6 +17,8 @@ function secret(name: string): string {
   throw new Error(`Missing env ${name} (or ${name}_FILE)`);
 }
 
+const computerProvider = (process.env.COMPUTER_PROVIDER ?? 'orgo').toLowerCase();
+
 const hermesHome = process.env.HERMES_HOME_PRIMARY ?? path.join(os.homedir(), '.hermes');
 
 export const env = {
@@ -27,7 +29,8 @@ export const env = {
   xaiKey: req('XAI_API_KEY'),
   xaiModel: process.env.XAI_MODEL ?? 'grok-4.7',
   composioKey: req('COMPOSIO_API_KEY'),
-  orgoKey: secret('ORGO_API_KEY'),
+  /** Only the Orgo provider needs it. */
+  orgoKey: computerProvider === 'orgo' ? secret('ORGO_API_KEY') : '',
   sessionSecret: req('SESSION_SECRET'),
   devLogin: process.env.DEV_LOGIN === '1',
   dbPath: process.env.DB_PATH ?? new URL('../../data/grokbot.db', import.meta.url).pathname,
@@ -50,16 +53,20 @@ export const env = {
   primaryBotLabel: process.env.PRIMARY_BOT_LABEL ?? 'Chief of Staff',
 
   // ---- the one shared computer ----
+  /** Where the bots' screens live: `orgo` (a cloud computer) or `local` (this machine's own X displays). */
+  computerProvider,
   /** The Orgo computer every bot works on (one screen each). Empty = legacy one-box-per-user mode is not supported. */
   orgoComputerId: process.env.ORGO_COMPUTER_ID ?? '',
   /** This server runs on that computer, so shell commands run locally instead of through Orgo's API. */
-  localBox: process.env.HQ_LOCAL === '1',
+  localBox: process.env.HQ_LOCAL === '1' || computerProvider === 'local',
+  /** Pixel size of each screen the local provider starts. */
+  localScreenSize: process.env.LOCAL_SCREEN_SIZE ?? '1440x900',
   /**
    * DevTools URL of a Chrome that already runs on the default screen and belongs to the primary bot
    * (e.g. http://127.0.0.1:9333). When set, we never start or stop that screen's Chrome ourselves.
    */
   primaryCdpUrl: process.env.PRIMARY_CDP_URL ?? '',
-  /** Bots that can each have a screen (Orgo allows four screens on one Linux computer). */
+  /** Bots that can each have a screen (Orgo allows four on one Linux computer; on a local box it is a memory budget). */
   maxBots: Number(process.env.MAX_BOTS ?? 4),
   /** Comma-separated emails allowed to sign in; empty = anyone who can reach the app. */
   allowedEmails: (process.env.ALLOWED_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),

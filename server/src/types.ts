@@ -177,6 +177,9 @@ export interface LibraryFile { name: string; size: number; modifiedAt: number; i
 
 export interface ComputerState {
   status: 'absent' | 'creating' | 'starting' | 'running' | 'suspending' | 'suspended' | 'resuming' | 'error' | 'stopped';
+  /** Which computer provider the screens come from (`orgo`, `local`). */
+  provider?: string;
+  /** The computer's id at that provider. */
   orgoId: string | null;
   error: string | null;
   /** One screen per bot on the shared computer. width/height are the screen's pixel size. */
