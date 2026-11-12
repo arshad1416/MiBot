@@ -53,6 +53,8 @@ export const env = {
   enginePortBase: Number(process.env.ENGINE_PORT_BASE ?? 8650),
   /** URL the Hermes gateways use to reach this server's MCP endpoint. */
   mcpBaseUrl: (process.env.MCP_BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 8787}`).replace(/\/+$/, ''),
+  /** A folder of Hermes MCP catalog manifests (<name>/manifest.yaml), when it is not where Hermes keeps it. */
+  connectorCatalogDir: process.env.CONNECTOR_CATALOG_DIR ?? '',
   /** Extra MCP servers every managed bot gets, as a JSON object of Hermes `mcp_servers` entries (e.g. X's XMCP). */
   extraMcpServers: process.env.EXTRA_MCP_SERVERS ?? '',
   primaryBotName: process.env.PRIMARY_BOT_NAME ?? 'Doug',

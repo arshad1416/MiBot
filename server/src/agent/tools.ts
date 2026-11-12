@@ -4,7 +4,10 @@ import { hub } from '../lib/hub.js';
 import { box } from '../box.js';
 import { env } from '../env.js';
 import { appendRow, getBotRow, listRoutines, toRoutine, describeCron } from '../store.js';
-import { executeComposio, innerToolSlugs, isReadOnlySlug, toolkitInfo } from '../composio.js';
+import { appInfo } from '../apps.js';
+import { executeComposio, innerToolSlugs, isReadOnlySlug } from '../composio.js';
+import { splitToolName } from '../connectors/client.js';
+import { botConnections } from '../connectors/store.js';
 import { scheduleRoutine, unscheduleRoutine } from '../routines.js';
 import { createEventRoutine, deleteEventTrigger, describeEvent, listTriggerTypes } from '../triggers.js';
 import { setCheckins } from '../proactive.js';
@@ -312,13 +315,13 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'request_app_connection',
-    description: 'Ask the user to connect an app (e.g. gmail, googlecalendar, slack, github, notion, linear) so you can use it. Use the Composio toolkit slug.',
+    description: 'Ask the user to connect an app (e.g. notion, linear, stripe, plaid, github) so you can use it. Use the app name in lower case.',
     parameters: obj({ toolkit: { type: 'string' }, reason: { type: 'string' } }, ['toolkit', 'reason']),
     activity: 'connecting_service',
     label: 'Using a connected app',
     impl: async (a, ctx) => {
-      const info = await toolkitInfo(String(a.toolkit).toLowerCase());
-      if (!info) return { output: `Unknown toolkit "${a.toolkit}". Use COMPOSIO_SEARCH_TOOLS to find the right toolkit slug.` };
+      const info = await appInfo(String(a.toolkit).toLowerCase().replace(/[^a-z0-9]+/g, '_'), ctx.userId);
+      if (!info) return { output: `There is no app called "${a.toolkit}" to connect. Tell the user which app you need; they can add it under Connect Apps.` };
       appendRow(ctx.botId, 'card', { type: 'card', card: 'connect', toolkit: info.slug, toolkitName: info.name, logo: info.logo, reason: a.reason, status: 'pending' });
       return { output: `Asked the user to connect ${info.name}. Stop here; you'll be told when it's connected.`, endTurn: true };
     },
@@ -331,8 +334,16 @@ export const toolMap = new Map(TOOLS.map((t) => [t.name, t]));
 
 export type Decision = 'allow' | 'ask' | 'block';
 
-export function policyFor(userId: string, toolName: string, args: any): { decision: Decision; key: string; toolkit?: string; title: string } {
+export function policyFor(userId: string, toolName: string, args: any, botId?: string): { decision: Decision; key: string; toolkit?: string; title: string } {
   if (toolMap.has(toolName)) return { decision: 'allow', key: toolName, title: toolName };
+  const direct = botId ? directTool(userId, botId, toolName) : null;
+  if (direct) {
+    // Same key shape as a Composio action (APP_ACTION), so saved "always allow" choices work alike.
+    const key = `${direct.connection.slug}_${direct.tool.name}`.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase();
+    const p = db.prepare('SELECT mode FROM policies WHERE user_id=? AND tool=?').get(userId, key) as any;
+    const mode = p?.mode ?? (direct.tool.readOnly ? 'always_allow' : 'needs_approval');
+    return { decision: mode === 'blocked' ? 'block' : mode === 'always_allow' ? 'allow' : 'ask', key, toolkit: direct.connection.slug, title: `${direct.connection.name}: ${direct.tool.name.replace(/[_-]+/g, ' ').toLowerCase()}` };
+  }
   const slugs = innerToolSlugs(toolName, args);
   if (!slugs.length) {
     // Composio's sandbox can run app actions from code, which would slip past the per-action
@@ -353,6 +364,15 @@ export function policyFor(userId: string, toolName: string, args: any): { decisi
     if (mode === 'needs_approval') { decision = 'ask'; key = slug; }
   }
   return { decision, key, toolkit: key.split('_')[0].toLowerCase(), title: humanizeSlug(key) };
+}
+
+/** The connected app and tool behind a name like `notion__search`, when this bot may use that app. */
+export function directTool(userId: string, botId: string, toolName: string) {
+  const parts = splitToolName(toolName);
+  if (!parts) return null;
+  const connection = botConnections(userId, botId).find((c) => c.slug === parts.slug);
+  const tool = connection?.tools.find((t) => t.name === parts.tool);
+  return connection && tool ? { connection, tool } : null;
 }
 
 export function humanizeSlug(slug: string) {

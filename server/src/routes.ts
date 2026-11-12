@@ -12,7 +12,11 @@ import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComp
 import { assignEngine, provisionEngine, removeEngine, syncPersona } from './engine.js';
 import { deleteMemory, listMemories, memoryBot } from './engine-memory.js';
 import { provider } from './providers/index.js';
-import { catalog, connectedToolkits, deleteConnection, disconnect, googleProfile, startConnect, startGoogleLogin, toolkitInfo } from './composio.js';
+import { appCatalog, appInfo, connectedApps, withBots } from './apps.js';
+import { connectedToolkits, deleteConnection, disconnect, googleProfile, startConnect, startGoogleLogin } from './composio.js';
+import { connectorEntry } from './connectors/catalog.js';
+import { addCustom, completeOAuth, disconnect as disconnectDirect, startConnect as startDirectConnect } from './connectors/client.js';
+import { botHas, getConnection, setBotConnection } from './connectors/store.js';
 import { runRoutine, scheduleRoutine, unscheduleRoutine } from './routines.js';
 import { deleteEventTrigger } from './triggers.js';
 import { dispatchRoomMessage } from './agent/rooms.js';
@@ -399,60 +403,116 @@ api.get('/bots/:id/screenshot', async (c) => {
   }
 });
 
-// ---------- apps (Composio marketplace) ----------
+// ---------- apps: direct connectors, plus Composio's catalog when it is set up ----------
 
 api.get('/apps', async (c) => {
   const user = c.get('user');
   const search = (c.req.query('search') ?? '').toLowerCase();
   const category = c.req.query('category') ?? '';
-  const [all, connected] = await Promise.all([catalog(), connectedToolkits(user.id).catch(() => new Set<string>())]);
-  let items: Toolkit[] = all.map((t) => ({ ...t, connected: connected.has(t.slug) }));
+  const [all, connected] = await Promise.all([appCatalog(user.id), connectedApps(user.id)]);
+  let items: Toolkit[] = all.map((t) => (connected.has(t.slug) ? withBots(user.id, t) : { ...t, connected: false }));
   if (search) items = items.filter((t) => t.name.toLowerCase().includes(search) || t.slug.includes(search) || t.description?.toLowerCase().includes(search));
   if (category) items = items.filter((t) => t.categories.some((x) => x.toLowerCase() === category.toLowerCase()));
   const categories = [...new Set(all.flatMap((t) => t.categories))].sort();
-  const connectedApps = all.filter((t) => connected.has(t.slug)).map((t) => ({ ...t, connected: true }));
-  return c.json({ apps: items.slice(0, Number(c.req.query('limit') ?? 120)), connected: [...connected], connectedApps, categories, total: items.length });
+  const connectedList = all.filter((t) => connected.has(t.slug)).map((t) => withBots(user.id, t));
+  return c.json({ apps: items.slice(0, Number(c.req.query('limit') ?? 120)), connected: [...connected], connectedApps: connectedList, categories, total: items.length });
+});
+
+/** Which chat asked for a connection, kept while the person is away on the app's sign-in page. */
+const askedBy = new Map<string, { botId?: string; seq?: number }>();
+const askKey = (userId: string, slug: string) => `${userId}\0${slug}`;
+
+/** An app just got connected: switch it on for the bot that asked, settle its card, and tell the bot. */
+async function afterConnected(userId: string, slug: string, botId?: string, seq?: number) {
+  hub.emit(userId, { type: 'connections' });
+  if (!botId || !ownBot(userId, botId)) return;
+  if (getConnection(userId, slug)) setBotConnection(botId, slug, true);
+  const info = await appInfo(slug, userId);
+  if (seq) {
+    const row = getRow(botId, seq);
+    if (row?.body.type === 'card' && row.body.card === 'connect') updateRow(botId, seq, { ...row.body, status: 'connected' });
+  }
+  enqueue(botId, { type: 'system', text: `The user connected ${info?.name ?? slug}. Continue with what you were doing.` });
+}
+
+const closePage = (slug: string, ok: boolean, message = '') =>
+  `<!doctype html><meta charset="utf-8"><title>${ok ? 'Connected' : 'Not connected'}</title><body style="font-family:system-ui;padding:40px;text-align:center">${ok ? 'Connected. You can close this window.' : `Connection failed. ${message.replace(/[<>&]/g, '')}`}<script>try{window.opener&&window.opener.postMessage({type:'grokbot-connected',slug:${JSON.stringify(slug)},ok:${ok}},'*')}catch(e){};${ok ? 'setTimeout(()=>window.close(),800)' : ''}</script></body>`;
+
+api.post('/apps/custom', async (c) => {
+  const user = c.get('user');
+  const b = await c.req.json<{ name?: string; url?: string; auth?: string; apiKey?: string }>().catch(() => ({} as any));
+  const auth = b.auth === 'oauth' || b.auth === 'api_key' ? b.auth : 'none';
+  let slug: string;
+  try { slug = addCustom(user.id, String(b.name ?? ''), String(b.url ?? ''), auth); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+  const r = await startDirectConnect(user.id, slug, { apiKey: b.apiKey });
+  if (r.status === 'error') disconnectDirect(user.id, slug);
+  else hub.emit(user.id, { type: 'connections' });
+  return c.json({ slug, ...r }, r.status === 'error' ? 502 : 200);
 });
 
 api.post('/apps/:slug/connect', async (c) => {
   const user = c.get('user');
   const slug = c.req.param('slug');
-  const { botId, seq } = await c.req.json<{ botId?: string; seq?: number }>().catch(() => ({} as any));
+  const { botId, seq, apiKey } = await c.req.json<{ botId?: string; seq?: number; apiKey?: string }>().catch(() => ({} as any));
+  if (connectorEntry(slug) || getConnection(user.id, slug)) {
+    const r = await startDirectConnect(user.id, slug, { apiKey });
+    if (r.status === 'redirect') askedBy.set(askKey(user.id, slug), { botId, seq });
+    if (r.status === 'connected') await afterConnected(user.id, slug, botId, seq);
+    return c.json(r, r.status === 'error' ? 502 : 200);
+  }
   const cb = new URL(`${env.serverUrl}/api/apps/callback`);
   cb.searchParams.set('slug', slug);
   if (botId) cb.searchParams.set('bot', botId);
   if (seq) cb.searchParams.set('seq', String(seq));
   const r = await startConnect(user.id, slug, cb.toString());
-  return c.json(r);
+  return c.json({ status: 'redirect', ...r });
+});
+
+/** Where a direct app's sign-in page sends the person back to. */
+api.get('/apps/oauth/callback', async (c) => {
+  const user = c.get('user');
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+  if (!code || !state) return c.html(closePage('', false, c.req.query('error_description') ?? c.req.query('error') ?? 'The app sent no sign-in code.'));
+  const conn = await completeOAuth(state, code);
+  // The state is a one-time secret, but it must also belong to whoever is signed in here.
+  if (!conn || conn.userId !== user.id) return c.html(closePage('', false, 'This sign-in was not started here, or it expired.'));
+  const asked = askedBy.get(askKey(user.id, conn.slug));
+  askedBy.delete(askKey(user.id, conn.slug));
+  if (conn.status !== 'connected') return c.html(closePage(conn.slug, false, conn.error ?? ''));
+  await afterConnected(user.id, conn.slug, asked?.botId, asked?.seq);
+  return c.html(closePage(conn.slug, true));
 });
 
 api.get('/apps/callback', async (c) => {
   const userId = userFromCookieHeader(c.req.header('cookie'))?.id ?? '';
   const slug = c.req.query('slug') ?? '';
-  const botId = c.req.query('bot');
-  const seq = Number(c.req.query('seq') ?? 0);
   const ok = c.req.query('status') !== 'failed';
   const userExists = db.prepare('SELECT 1 FROM users WHERE id=?').get(userId);
-  if (userExists && ok) {
-    const connected = await connectedToolkits(userId).catch(() => new Set<string>());
-    if (connected.has(slug)) {
-      hub.emit(userId, { type: 'connections' });
-      if (botId && ownBot(userId, botId)) {
-        const info = await toolkitInfo(slug);
-        if (seq) {
-          const row = getRow(botId, seq);
-          if (row?.body.type === 'card' && row.body.card === 'connect') updateRow(botId, seq, { ...row.body, status: 'connected' });
-        }
-        enqueue(botId, { type: 'system', text: `The user connected ${info?.name ?? slug}. Continue with what you were doing.` });
-      }
-    }
+  if (userExists && ok && (await connectedToolkits(userId).catch(() => new Set<string>())).has(slug)) {
+    await afterConnected(userId, slug, c.req.query('bot'), Number(c.req.query('seq') ?? 0));
   }
-  return c.html(`<!doctype html><meta charset="utf-8"><title>Connected</title><body style="font-family:system-ui;padding:40px;text-align:center">${ok ? 'Connected. You can close this window.' : 'Connection failed.'}<script>try{window.opener&&window.opener.postMessage({type:'grokbot-connected',slug:${JSON.stringify(slug)},ok:${ok}},'*')}catch(e){};setTimeout(()=>window.close(),800)</script></body>`);
+  return c.html(closePage(slug, ok));
+});
+
+/** Switch a connected direct app on or off for one bot. */
+api.put('/apps/:slug/bots/:botId', async (c) => {
+  const user = c.get('user');
+  const slug = c.req.param('slug');
+  const bot = ownBot(user.id, c.req.param('botId'));
+  if (!bot || !getConnection(user.id, slug)) return c.json({ error: 'not found' }, 404);
+  const { enabled } = await c.req.json<{ enabled?: boolean }>().catch(() => ({} as any));
+  setBotConnection(bot.id, slug, !!enabled);
+  hub.emit(user.id, { type: 'connections' });
+  return c.json({ ok: true, enabled: botHas(bot.id, slug) });
 });
 
 api.delete('/apps/:slug', async (c) => {
-  await disconnect(c.get('user').id, c.req.param('slug'));
-  hub.emit(c.get('user').id, { type: 'connections' });
+  const user = c.get('user');
+  const slug = c.req.param('slug');
+  if (getConnection(user.id, slug)) disconnectDirect(user.id, slug);
+  else await disconnect(user.id, slug);
+  hub.emit(user.id, { type: 'connections' });
   return c.json({ ok: true });
 });
 

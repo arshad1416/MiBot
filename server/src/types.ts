@@ -216,6 +216,14 @@ export interface EngineInfo {
 export interface Toolkit {
   slug: string; name: string; logo?: string; description?: string; categories: string[];
   managedAuth: boolean; noAuth: boolean; connected: boolean;
+  /** `direct` = the app's own MCP server, signed in to here; `composio` = through Composio. */
+  source?: 'direct' | 'composio';
+  /** Direct apps: how you sign in. `api_key` asks for a key instead of opening a sign-in page. */
+  auth?: 'oauth' | 'api_key' | 'none';
+  /** Direct apps: an MCP server the person added themselves. */
+  custom?: boolean;
+  /** Connected direct apps: the bots it is switched on for. */
+  bots?: string[];
 }
 
 /** Server-sent events on GET /api/events */

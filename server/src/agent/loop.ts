@@ -3,7 +3,7 @@ import { newId } from '../lib/ids.js';
 import { hub } from '../lib/hub.js';
 import { appendRow, emitBot, getBotRow, getLive, getRow, setLive, updateRow } from '../store.js';
 import type { ActivityKind, MessageBody, ToolCallBody } from '../types.js';
-import { toolkitInfo } from '../composio.js';
+import { appInfo as toolkitInfo } from '../apps.js';
 import { screenForWork } from '../computer.js';
 import { engineFor } from '../engine.js';
 import { instructionsFor } from './prompt.js';
