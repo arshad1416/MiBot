@@ -178,7 +178,7 @@ The e2e suite creates a temporary bot (with its own Hermes gateway and screen), 
 server/src/         API, Hermes adapter (agent/loop.ts), engines (engine.ts), MCP endpoint (mcp.ts), screens (computer.ts)
 server/box/         what runs on the computer to dress a screen (desktop, dock, home screen, Chrome)
 web/src/            chat, bot settings, app connections, computer viewer, voice
-scripts/            pack, install, Hermes config helper, sign-in link, run as a service (service.sh)
+scripts/            pack, install, Hermes config helper, sign-in link, first settings for a hub at home (hub-env.sh), run as a service (service.sh)
 tests/              Playwright end-to-end test, machine handoff test
 docs/               architecture; the Orgo and xAI/Composio guides predate the Hermes engine
 ```

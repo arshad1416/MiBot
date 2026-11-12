@@ -44,6 +44,18 @@ A job that is interrupted five times is given up on.
 - **Model sign-ins are per machine.** An agent started by a worker inherits model settings and keys
   from that machine's own `~/.hermes`, the same way the hub's extra Bots do.
 
+## Setting up the hub on a machine of your own
+
+On a machine that stays on (Linux here), with Node 22, the `hermes` CLI, Xvfb, x11vnc and
+ImageMagick installed, and this repository with `npm ci` run in it:
+
+1. Choose a model for Hermes once (`hermes model`). Each Bot's agent starts from those settings.
+2. `scripts/hub-env.sh https://<name>.<tailnet>.ts.net you@example.com` writes a first `.env`: this
+   machine's own screens, no Hermes agent that already runs there, listening on `127.0.0.1` only.
+   The address is the one `tailscale serve --bg 8787` gives the machine.
+3. `scripts/service.sh hub` builds the app and keeps it running.
+4. `bash scripts/sign-in-link.sh you@example.com` prints a link that signs your browser in.
+
 ## Adding a machine
 
 1. In the app: **Settings › Machines › Add a machine**. Give it a name and say which jobs it takes.
