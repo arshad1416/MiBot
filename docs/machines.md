@@ -47,7 +47,9 @@ A job that is interrupted five times is given up on.
 ## Setting up the hub on a machine of your own
 
 On a machine that stays on (Linux here), with Node 22, the `hermes` CLI, Xvfb, x11vnc and
-ImageMagick installed, and this repository with `npm ci` run in it:
+ImageMagick installed, and this repository with `npm ci` run in it. A window manager (xfwm4,
+openbox, marco, metacity or icewm) is started on each screen when the machine has one, which gives
+windows there a title bar; without one a sign-in window still takes the keyboard:
 
 1. Choose a model for Hermes once (`hermes model`). Each Bot's agent starts from those settings.
 2. `scripts/hub-env.sh https://<name>.<tailnet>.ts.net you@example.com` writes a first `.env`: this

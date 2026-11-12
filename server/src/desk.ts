@@ -24,6 +24,7 @@ const BOX_FILES: Record<string, string> = {
   'hq-screen.py': 'hq-screen.py',
   'hq-shell.py': 'hq-shell.py',
   'hq-home.py': 'hq-home.py',
+  'hq-focus.py': 'hq-focus.py',
   'home.html': 'home.html',
   'ext/manifest.json': 'ext/src/manifest.json',
   'ext/newtab.html': 'ext/src/newtab.html',

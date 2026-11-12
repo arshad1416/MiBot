@@ -10,7 +10,8 @@ import type { ComputerProvider, ProviderScreen } from './types.js';
  * screen is :99, the others :100 and up, the same numbering Orgo uses so the rest of the app does
  * not care which provider it has. Watching a screen goes through an x11vnc bound to localhost.
  *
- * Needs on the machine: Xvfb, x11vnc and ImageMagick's `import`.
+ * Needs on the machine: Xvfb, x11vnc and ImageMagick's `import`. The display starts bare; the box
+ * scripts bring up a window manager on it when something is first opened there (hqlib.py).
  */
 
 const DEFAULT_DISPLAY = 99;
