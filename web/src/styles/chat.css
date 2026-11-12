@@ -176,6 +176,8 @@
 .thinking__alert { position: absolute; z-index: 2; left: calc(50% + 12px); top: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-warn); box-shadow: 0 0 0 2px var(--color-bg-chrome); }
 .thinking.is-waiting .thinking__mascot { animation: none; }
 .thinking.is-waiting .thinking__status { animation: none; color: #FFB648; }
+/* On hold (waiting for a machine, or paused while its machine is away): nothing is happening, so nothing moves. */
+.thinking.is-held .thinking__mascot, .thinking.is-held .thinking__status { animation: none; }
 .thinking__side { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-bottom: 7px; }
 .thinking__caption { display: grid; min-width: 0; font-size: 14px; line-height: 20px; letter-spacing: 0.14px; color: var(--color-text-secondary); }
 .thinking__caption-line { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

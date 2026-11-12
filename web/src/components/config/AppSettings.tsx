@@ -10,11 +10,13 @@ import { computerStatusText } from '../DetailsPanel';
 import { Icon } from '../Icon';
 import { ToolkitLogo } from '../ToolkitLogo';
 import { Glyph } from './glyphs';
-import { ConfirmButton } from './ui';
+import { MachinesSection } from './MachinesSection';
+import { ConfirmButton, PageHead } from './ui';
 
 const SECTIONS: { id: AppSection; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'computer', label: 'Computer' },
+  { id: 'machines', label: 'Machines' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'apps', label: 'Connected apps' },
   { id: 'account', label: 'Account' },
@@ -47,6 +49,7 @@ export function AppSettings() {
         <div className="app-settings__page">
           {section === 'general' && <GeneralSection />}
           {section === 'computer' && <ComputerSection />}
+          {section === 'machines' && <MachinesSection />}
           {section === 'permissions' && <PermissionsSection />}
           {section === 'apps' && <AppsSection />}
           {section === 'account' && <AccountSection />}
@@ -54,15 +57,6 @@ export function AppSettings() {
       </div>
     </div>,
     document.body,
-  );
-}
-
-function PageHead({ title, sub }: { title: string; sub?: string }) {
-  return (
-    <div className="app-settings__head">
-      <h1>{title}</h1>
-      {sub && <p>{sub}</p>}
-    </div>
   );
 }
 

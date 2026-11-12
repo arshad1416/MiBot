@@ -81,6 +81,7 @@ flowchart LR
 - **Every other bot gets its own Hermes home and gateway**, started by the app. Each has its own model, sign-in, memory, browser profile and files.
 - **The app's tools reach Hermes over MCP.** The server exposes `/mcp/<bot>`. Each agent gets connected apps, `x_search`, tasks, routines, the Library, and messages to other bots.
 - **Screens are dressed to look like the bot's own computer**: a light desktop with a dock, and a home screen with the bot's name and apps as Chrome's new tab page.
+- **Jobs can run on more than one machine.** The server is the hub. Another machine runs `npm run worker` and takes the jobs it is set to take; a job whose machine falls asleep is paused and carries on when it wakes. See [docs/machines.md](docs/machines.md).
 
 More detail is in the [architecture guide](docs/ARCHITECTURE.md).
 
@@ -168,6 +169,7 @@ Open a bot's details panel, **Engine**. Pick a provider and model there. **Sign 
 npm run typecheck       # server and web
 npm run build
 node tests/e2e.mjs https://<your-url>    # needs DEV_LOGIN=1, or E2E_SESSION=<session cookie>
+node tests/machines.mjs                  # handoff between machines, with a stand-in for Hermes; needs nothing running
 ```
 
 The e2e suite creates a temporary bot (with its own Hermes gateway and screen), exercises chat, the browser on its screen, the live viewer, connected apps, voice sessions and settings, then deletes it. It calls real providers.
@@ -176,8 +178,8 @@ The e2e suite creates a temporary bot (with its own Hermes gateway and screen), 
 server/src/         API, Hermes adapter (agent/loop.ts), engines (engine.ts), MCP endpoint (mcp.ts), screens (computer.ts)
 server/box/         what runs on the computer to dress a screen (desktop, dock, home screen, Chrome)
 web/src/            chat, bot settings, app connections, computer viewer, voice
-scripts/            pack, install, Hermes config helper, sign-in link
-tests/              Playwright end-to-end test
+scripts/            pack, install, Hermes config helper, sign-in link, run as a service (service.sh)
+tests/              Playwright end-to-end test, machine handoff test
 docs/               architecture; the Orgo and xAI/Composio guides predate the Hermes engine
 ```
 

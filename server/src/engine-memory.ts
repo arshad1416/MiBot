@@ -58,3 +58,31 @@ export function deleteMemory(id: string): boolean {
   fs.writeFileSync(file, keep.join(SEP) + (keep.length ? '\n' : ''));
   return true;
 }
+
+// ---------- carrying memory to another machine and back ----------
+
+/** The memory files as they are on the hub, for an agent that runs this bot's job elsewhere. null = no such file. */
+export function readMemoryFiles(botId: string): Record<string, string | null> {
+  const home = engineHome(botId);
+  const out: Record<string, string | null> = {};
+  for (const f of FILES) {
+    try { out[f.file] = home ? fs.readFileSync(path.join(home, 'memories', f.file), 'utf8') : null; } catch { out[f.file] = null; }
+  }
+  return out;
+}
+
+/** What the agent elsewhere left in its memory files after the job. The hub's copy is the one that counts. */
+export function writeMemoryFiles(botId: string, files: Record<string, string | null>) {
+  const home = engineHome(botId);
+  if (!home) return;
+  for (const f of FILES) {
+    const text = files[f.file];
+    if (typeof text !== 'string') continue;
+    const file = path.join(home, 'memories', f.file);
+    let old: string | null = null;
+    try { old = fs.readFileSync(file, 'utf8'); } catch { /* none yet */ }
+    if (old === text) continue;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  }
+}

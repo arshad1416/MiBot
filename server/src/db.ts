@@ -132,6 +132,43 @@ CREATE TABLE IF NOT EXISTS skills (
   body TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS machines (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT,
+  takes TEXT NOT NULL DEFAULT 'both',
+  rank INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  info TEXT NOT NULL DEFAULT '{}',
+  last_seen_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  trigger TEXT NOT NULL,
+  weight TEXT NOT NULL,
+  status TEXT NOT NULL,
+  machine_id TEXT,
+  move_to TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  row_seq INTEGER,
+  start_seq INTEGER,
+  generation INTEGER NOT NULL,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  finished_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS jobs_open ON jobs(status, created_at);
+CREATE TABLE IF NOT EXISTS machine_threads (
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  generation INTEGER NOT NULL,
+  machine_id TEXT NOT NULL,
+  seen_seq INTEGER NOT NULL,
+  PRIMARY KEY (bot_id, generation, machine_id)
+);
 CREATE TABLE IF NOT EXISTS composio_sessions (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL
@@ -153,6 +190,8 @@ addColumn('bots', 'provider', 'TEXT');
 addColumn('bots', 'engine', 'TEXT');
 addColumn('bots', 'engine_port', 'INTEGER');
 addColumn('bots', 'handback_at', 'INTEGER');
+// Handoff between machines: how big this bot's jobs are ('light' may run on a small machine).
+addColumn('bots', 'weight', "TEXT NOT NULL DEFAULT 'heavy'");
 addColumn('screens', 'width', 'INTEGER');
 addColumn('screens', 'height', 'INTEGER');
 

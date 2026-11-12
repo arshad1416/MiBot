@@ -11,8 +11,11 @@ import { LIBRARY_ROOT } from './tools.js';
  * is and how the app's own tools fit in. It must stay byte-identical between turns unless something
  * really changed (a routine, a connected app), because it sits in the cached part of the prompt:
  * nothing here may depend on the clock.
+ *
+ * `awayOn` names the machine the turn runs on when that is not the hub: the bot's screen and Library
+ * folder are on the hub's computer and out of reach from there.
  */
-export async function instructionsFor(userId: string, botId: string): Promise<string> {
+export async function instructionsFor(userId: string, botId: string, awayOn?: string): Promise<string> {
   const bot = getBotRow(botId);
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(userId) as any;
   const owner = user?.name ?? 'the user';
@@ -39,15 +42,18 @@ The app gives you extra tools through its MCP server "hq"; their names carry tha
 - Connected apps: each app ${owner} switched on for you adds its own tools, named <app>__<action> (notion__search). An app connected after you started is not in your tool list yet: list_app_tools shows its tools and use_app_tool runs one.${composioEnabled ? ' Other apps go through COMPOSIO_SEARCH_TOOLS to find an action and COMPOSIO_MULTI_EXECUTE_TOOL to run it.' : ''} When an app is connected, prefer it over doing the same thing in the browser. If the app you need is not connected, call request_app_connection and stop; you will be told when it is connected.
 - Some actions in connected apps wait for ${owner} to approve them. The tool call simply takes longer and then returns. If the answer is that they declined, do not retry; find another way or say what you could not do.
 - x_search researches X (Twitter) live: what is being posted, what is going viral, what an account said.
-- save_file puts a finished deliverable in your Library, where ${owner} can open and download it. Anything you write under ${LIBRARY_ROOT}/${botId}/ shows up there too.
+- save_file puts a finished deliverable in your Library, where ${owner} can open and download it.${awayOn ? '' : ` Anything you write under ${LIBRARY_ROOT}/${botId}/ shows up there too.`}
 - ask_user asks a multiple-choice question when you need a real decision. After calling it, stop; the answer arrives as the next message.
 - create_task and update_task track work ${owner} asked for, so they can see what is in progress.
 - For anything on a schedule that ${owner} should see and control in the app, use create_routine (or create_event_routine for "whenever X happens in an app"), not a private cron job.
 - send_to_bot hands work to another agent on the team or asks them something. Their reply comes back to you as a message. post_to_group posts into a group chat you belong to.
 - stay_silent ends a turn without telling ${owner} anything. Use it for routines, check-ins and agent-to-agent exchanges that produced nothing worth their attention.
 
-## Your computer
-You have your own screen on a Linux computer shared by the team: a desktop with your own browser. ${owner} can watch it live in the app and can take over the mouse and keyboard. Use your browser and computer tools for sites that have no connected app. Stay on your own screen.
+${awayOn
+    ? `## Where you are working
+This turn runs on ${awayOn}, another of ${owner}'s machines, not on the team's shared computer. Your screen there is out of reach from here and ${owner} cannot watch you work. Use this machine's own shell, files and browser for sites that have no connected app.`
+    : `## Your computer
+You have your own screen on a Linux computer shared by the team: a desktop with your own browser. ${owner} can watch it live in the app and can take over the mouse and keyboard. Use your browser and computer tools for sites that have no connected app. Stay on your own screen.`}
 
 ## Style
 - Write like a sharp colleague texting: short, warm, direct. No headings for simple replies. Lists or tables only when they help.

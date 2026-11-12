@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bot, LiveState, Row } from '@shared/types';
 import { BotAvatarFor } from '../avatar/BotAvatar';
-import { activityPhrase, activityStatus, isWaitingForYou } from '../lib/phrases';
+import { activityPhrase, activityStatus, isOnHold, isWaitingForYou } from '../lib/phrases';
 import { duration } from '../lib/time';
 
 const CAPTION_FADE_MS = 320;
@@ -57,6 +57,7 @@ export function ThinkingBlock({ bot, live, rows, steps = 0 }: Props) {
   }, []);
 
   const waiting = isWaitingForYou(live);
+  const onHold = !waiting && isOnHold(live);
   const status = activityStatus(live, rows);
   const since = live.startedAt ?? live.activity?.since ?? live.awaiting?.since ?? now;
   const tick = Math.floor((now - (live.activity?.since ?? since)) / 6000);
@@ -65,13 +66,14 @@ export function ThinkingBlock({ bot, live, rows, steps = 0 }: Props) {
     : live.caption?.trim() || activityPhrase(live, rows, tick);
   const timer = waiting
     ? live.awaiting && now - live.awaiting.since >= 1000 ? `Waiting for ${duration(now - live.awaiting.since)}` : null
+    : onHold ? (now - live.activity!.since >= 1000 ? `Waiting for ${duration(now - live.activity!.since)}` : null)
     : now - since >= 1000 ? `Working for ${duration(now - since)}` : null;
 
   return (
-    <div className={`thinking${waiting ? ' is-waiting' : ''}`}>
+    <div className={`thinking${waiting ? ' is-waiting' : ''}${onHold ? ' is-held' : ''}`}>
       <div className="thinking__badge">
         <span className="thinking__mascot"><BotAvatarFor bot={bot} size={36} /></span>
-        {waiting ? <span className="thinking__alert" aria-hidden /> : <IdeaBulb />}
+        {waiting ? <span className="thinking__alert" aria-hidden /> : onHold ? null : <IdeaBulb />}
         <div className="thinking__pill" role="status" aria-live="polite">
           <span className="thinking__name">{bot.name}</span>
           <span className="thinking__status" key={status}>{status}</span>

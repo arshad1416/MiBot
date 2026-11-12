@@ -14,12 +14,13 @@ import { initSubagents } from './agent/subagents.js';
 import { initRooms } from './agent/rooms.js';
 import { checkinsApi } from './routes-proactive.js';
 import { roomsApi } from './routes-rooms.js';
-import { enqueue, expireStaleApprovals } from './agent/loop.js';
+import { enqueue, expireStaleApprovals, resumeJobs } from './agent/loop.js';
 import { desSelfTest } from './lib/des.js';
 import { configApi } from './routes-config.js';
 import { startIdleWatcher } from './idle.js';
 import { mcpApi } from './mcp.js';
 import { initEngines } from './engine.js';
+import { machinesApi, workerApi } from './routes-machines.js';
 
 if (!desSelfTest()) throw new Error('DES self-test failed');
 initSubagents();
@@ -33,8 +34,11 @@ app.get('/api/health', (c) => c.json({ ok: true, engine: 'hermes' }));
 app.route('/mcp', mcpApi);
 app.route('/api/checkins', checkinsApi);
 app.route('/api/rooms', roomsApi);
+// Workers on other machines sign in with their own token, not a user session.
+app.route('/api/worker', workerApi);
 app.route('/api', api);
 app.route('/api', configApi);
+app.route('/api', machinesApi);
 
 // Serve the built web app in production.
 const webDist = path.resolve(new URL('.', import.meta.url).pathname, '../../web/dist');
@@ -49,7 +53,8 @@ attachVncRelay(server as unknown as Server);
 if (process.env.GROKBOT_NO_SCHEDULER !== '1') {
   initRoutines(enqueue);
   void initTriggers(enqueue);
-initProactive(enqueue);
+  initProactive(enqueue);
+  resumeJobs();
 } else console.log('[grokbot] scheduler disabled (GROKBOT_NO_SCHEDULER=1)');
 startIdleWatcher();
 initEngines();

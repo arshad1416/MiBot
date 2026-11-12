@@ -1,4 +1,4 @@
-import type { Bot, ComputerState, EngineInfo, LibraryFile, Memory, Routine, Skill, Task, Toolkit } from '@shared/types';
+import type { Bot, ComputerState, EngineInfo, JobInfo, LibraryFile, Machine, Memory, Routine, Skill, Task, Toolkit } from '@shared/types';
 import { ApiError } from './api';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -32,7 +32,10 @@ export interface ComputerDetails {
   hibernation: { idleMinutes: number; viewers: number; dryRun: boolean };
 }
 
-export type BotPatch = Partial<Pick<Bot, 'name' | 'label' | 'description' | 'instructions' | 'avatarShape' | 'avatarColor' | 'effort' | 'mode'>>;
+export type BotPatch = Partial<Pick<Bot, 'name' | 'label' | 'description' | 'instructions' | 'avatarShape' | 'avatarColor' | 'effort' | 'mode' | 'weight'>>;
+
+export interface MachinesBundle { machines: Machine[]; jobs: JobInfo[]; hubUrl: string }
+export type MachinePatch = Partial<Pick<Machine, 'name' | 'takes' | 'rank' | 'enabled'>>;
 
 export const configApi = {
   settings: (botId: string) => req<BotSettingsBundle>('GET', `/bots/${botId}/settings`),
@@ -71,6 +74,14 @@ export const configApi = {
   restartEngine: (botId: string) => req<{ engine: EngineInfo }>('POST', `/bots/${botId}/engine/restart`),
   /** Stops the private screen the agent runs for itself, so its computer work shows on the screen in the app. */
   stopOwnScreen: (botId: string) => req<{ engine: EngineInfo }>('POST', `/bots/${botId}/engine/screen/stop`),
+
+  machines: () => req<MachinesBundle>('GET', '/machines'),
+  /** The token in the answer is shown once; the server keeps only its hash. */
+  addMachine: (name: string, takes: Machine['takes']) => req<{ machine: Machine; token: string }>('POST', '/machines', { name, takes }),
+  updateMachine: (id: string, p: MachinePatch) => req<{ machine: Machine }>('PATCH', `/machines/${id}`, p),
+  removeMachine: (id: string) => req<{ ok: true }>('DELETE', `/machines/${id}`),
+  moveJob: (id: string, machineId: string) => req<{ ok: true }>('POST', `/jobs/${id}/move`, { machineId }),
+  stopJob: (id: string) => req<{ ok: true }>('POST', `/jobs/${id}/stop`),
 
   policies: () => req<{ policies: { tool: string; mode: string }[] }>('GET', '/policies'),
   deletePolicy: (tool: string) => req<{ ok: true }>('DELETE', `/policies/${encodeURIComponent(tool)}`),
