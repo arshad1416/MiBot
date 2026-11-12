@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CardBody, Row } from '@shared/types';
-import { api, openPopup } from '../../lib/api';
+import { api, beginConnect } from '../../lib/api';
 import { useStore } from '../../store';
 import { Icon } from '../Icon';
 import { ToolkitLogo } from '../ToolkitLogo';
@@ -111,13 +111,13 @@ export function ConnectCard({ row, body }: { row: Row; body: Card<'connect'> }) 
   // Leave the "waiting" state once the server reports a connection change or the card resolves.
   useEffect(() => { setWaiting(false); }, [connectionsVersion, body.status]);
 
+  const [keyPrompt, setKeyPrompt] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState('');
+
   const connect = () => run('connect', async () => {
-    const popup = openPopup('about:blank');
-    try {
-      const { redirectUrl } = await api.connect(body.toolkit, row.botId, row.seq);
-      if (popup) popup.location.href = redirectUrl; else window.open(redirectUrl, '_blank');
-      setWaiting(true);
-    } catch (e) { popup?.close(); throw e; }
+    const r = await beginConnect(() => api.connect(body.toolkit, row.botId, row.seq, apiKey.trim() || undefined));
+    if (r.status === 'needs_key') setKeyPrompt(r.keyPrompt ?? `${body.toolkitName} API key`);
+    else if (r.redirectUrl) setWaiting(true);
   });
 
   return (
@@ -131,9 +131,10 @@ export function ConnectCard({ row, body }: { row: Row; body: Card<'connect'> }) 
       </div>
       {pending ? (
         <>
+          {keyPrompt && <input className="text-input" type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={keyPrompt} aria-label={keyPrompt} />}
           <div className="card__actions">
             <button type="button" className="btn btn--secondary" disabled={!!busy} onClick={() => run('skip', () => api.dismiss(row.botId, row.seq))}>Skip</button>
-            <button type="button" className="btn btn--primary" disabled={!!busy} onClick={connect}>{waiting ? 'Waiting for sign-in…' : 'Connect'}</button>
+            <button type="button" className="btn btn--primary" disabled={!!busy || (!!keyPrompt && !apiKey.trim())} onClick={connect}>{waiting ? 'Waiting for sign-in…' : keyPrompt ? 'Save key' : 'Connect'}</button>
           </div>
           {error && <div className="card__error">{error}</div>}
         </>

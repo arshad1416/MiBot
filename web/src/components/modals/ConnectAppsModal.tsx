@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Toolkit } from '@shared/types';
 import { BotAvatarFor } from '../../avatar/BotAvatar';
-import { api, openPopup, type AppsResponse } from '../../lib/api';
+import { api, beginConnect, type AppsResponse } from '../../lib/api';
 import { useStore } from '../../store';
 import { Icon } from '../Icon';
 import { Menu } from '../Menu';
 import { ToolkitLogo } from '../ToolkitLogo';
 import { Modal } from './Modal';
 
-/** Design pill → backend (Composio) category. */
+/** Design pill → backend category. `direct` is the apps this server signs in to itself. */
 const PILLS: { label: string; category: string }[] = [
+  { label: 'Direct', category: 'direct' },
   { label: 'Password Managers', category: 'security & identity tools' },
   { label: 'Productivity', category: 'productivity' },
   { label: 'Communication', category: 'communication' },
@@ -21,22 +22,44 @@ const pillLabel = (cat: string) => PILLS.find((p) => p.category === cat)?.label 
 
 type View = { kind: 'all' } | { kind: 'category'; category: string } | { kind: 'connected' };
 
+/** The bots a connected direct app is switched on for: click an avatar to switch it on or off. */
+function BotSwitches({ app, onChanged }: { app: Toolkit; onChanged: () => void }) {
+  const bots = useStore((s) => s.bots).filter((b) => b.kind !== 'room');
+  const [busy, setBusy] = useState<string | null>(null);
+  const on = new Set(app.bots ?? []);
+  const toggle = async (botId: string) => {
+    setBusy(botId);
+    try { await api.setAppBot(app.slug, botId, !on.has(botId)); onChanged(); } finally { setBusy(null); }
+  };
+  return (
+    <span className="app-row__bots">
+      {bots.map((b) => (
+        <button key={b.id} type="button" className={`app-row__bot${on.has(b.id) ? ' is-on' : ''}`} onClick={() => toggle(b.id)} disabled={busy === b.id}
+          aria-pressed={on.has(b.id)} title={`${b.name}: ${on.has(b.id) ? 'can use this app' : 'cannot use this app'}`}>
+          <BotAvatarFor bot={b} size={18} />
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function AppRow({ app, onChanged }: { app: Toolkit; onChanged: () => void }) {
-  const [state, setState] = useState<'idle' | 'busy' | 'waiting' | 'confirm'>('idle');
+  const [state, setState] = useState<'idle' | 'busy' | 'waiting' | 'confirm' | 'key'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [keyPrompt, setKeyPrompt] = useState('');
+  const [apiKey, setApiKey] = useState('');
   useEffect(() => { setState('idle'); }, [app.connected]);
 
   const connect = async () => {
     setState('busy'); setError(null);
-    const popup = openPopup('about:blank');
     try {
-      const { redirectUrl } = await api.connect(app.slug);
-      if (popup) popup.location.href = redirectUrl; else window.open(redirectUrl, '_blank');
-      setState('waiting');
+      const r = await beginConnect(() => api.connect(app.slug, undefined, undefined, apiKey.trim() || undefined));
+      if (r.status === 'needs_key') { setKeyPrompt(r.keyPrompt ?? `${app.name} API key`); setState('key'); }
+      else if (r.redirectUrl) setState('waiting');
+      else { setApiKey(''); onChanged(); }
     } catch (e) {
-      popup?.close();
       setError((e as Error).message || 'Couldn’t start the connection');
-      setState('idle');
+      setState(apiKey ? 'key' : 'idle');
     }
   };
   const disconnect = async () => {
@@ -50,7 +73,12 @@ function AppRow({ app, onChanged }: { app: Toolkit; onChanged: () => void }) {
       <ToolkitLogo name={app.name} logo={app.logo} />
       <span className="app-row__text">
         <span className="app-row__name">{app.name}</span>
-        {error ? <span className="app-row__error">{error}</span> : app.description && <span className="app-row__desc">{app.description}</span>}
+        {state === 'key' ? (
+          <input className="app-row__key" type="password" autoComplete="off" autoFocus value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) void connect(); }} placeholder={error ?? keyPrompt} aria-label={keyPrompt} />
+        ) : error ? <span className="app-row__error">{error}</span>
+          : app.connected && app.source === 'direct' ? <BotSwitches app={app} onChanged={onChanged} />
+          : app.description && <span className="app-row__desc">{app.description}</span>}
       </span>
       {app.connected ? (
         <button type="button" className={`app-row__connected${state === 'confirm' ? ' is-confirm' : ''}`} onClick={disconnect} onMouseLeave={() => state === 'confirm' && setState('idle')} disabled={state === 'busy'}>
@@ -59,11 +87,49 @@ function AppRow({ app, onChanged }: { app: Toolkit; onChanged: () => void }) {
       ) : app.noAuth ? (
         <span className="app-row__connected is-static"><Icon name="check" size={12} opacity={0.56} />Built in</span>
       ) : (
-        <button type="button" className="app-row__connect" onClick={connect} disabled={state === 'busy'}>
-          {state === 'busy' ? 'Opening…' : state === 'waiting' ? 'Waiting…' : 'Connect'}
+        <button type="button" className="app-row__connect" onClick={connect} disabled={state === 'busy' || (state === 'key' && !apiKey.trim())}>
+          {state === 'busy' ? 'Opening…' : state === 'waiting' ? 'Waiting…' : state === 'key' ? 'Save key' : 'Connect'}
         </button>
       )}
     </div>
+  );
+}
+
+/** Add an MCP server that is not in the catalog, by its address. */
+function AddOwnApp({ onAdded }: { onAdded: () => void }) {
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [auth, setAuth] = useState<'none' | 'oauth' | 'api_key'>('oauth');
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ready = name.trim() && url.trim() && (auth !== 'api_key' || apiKey.trim());
+
+  const add = async () => {
+    setBusy(true); setError(null);
+    try {
+      await beginConnect(() => api.addCustomApp({ name: name.trim(), url: url.trim(), auth, apiKey: auth === 'api_key' ? apiKey.trim() : undefined }));
+      setName(''); setUrl(''); setApiKey('');
+      onAdded();
+    } catch (e) { setError((e as Error).message || 'Couldn’t add the app'); } finally { setBusy(false); }
+  };
+
+  return (
+    <section className="apps-section apps-own">
+      <div className="apps-section__head"><span className="apps-section__title">Add your own</span></div>
+      <div className="apps-own__row">
+        <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="App name" />
+        <input className="text-input apps-own__url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://… MCP server address" aria-label="MCP server address" />
+        <select className="text-input" value={auth} onChange={(e) => setAuth(e.target.value as typeof auth)} aria-label="How to sign in">
+          <option value="oauth">Sign-in page</option>
+          <option value="api_key">API key</option>
+          <option value="none">No sign-in</option>
+        </select>
+        {auth === 'api_key' && <input className="text-input" type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API key" aria-label="API key" />}
+        <button type="button" className="app-row__connect" onClick={add} disabled={busy || !ready}>{busy ? 'Adding…' : 'Add'}</button>
+      </div>
+      {error && <div className="app-row__error">{error}</div>}
+    </section>
   );
 }
 
@@ -153,6 +219,7 @@ export function ConnectAppsModal() {
     body = (
       <>
         <Section title="Picked for you" apps={apps.slice(0, 6)} onChanged={refresh} />
+        <AddOwnApp onAdded={refresh} />
         {PILLS.map((p) => {
           const list = apps.filter((a) => a.categories.includes(p.category));
           return <Section key={p.category} title={p.label} apps={list.slice(0, 4)} onViewAll={list.length > 2 ? () => setView({ kind: 'category', category: p.category }) : undefined} onChanged={refresh} />;

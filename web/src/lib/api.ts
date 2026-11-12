@@ -22,10 +22,13 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 export interface AppsResponse { apps: Toolkit[]; connected: string[]; categories: string[]; total: number }
 
+/** What starting a connection led to: a sign-in page to open, a key to ask for, or it is already done. */
+export interface ConnectResult { status?: 'connected' | 'redirect' | 'needs_key'; redirectUrl?: string; keyPrompt?: string }
+
 export interface RoomMember { id: string; name: string; label: string; avatarShape: string; avatarColor: string }
 
 export const api = {
-  me: () => req<{ user: User | null; devLogin: boolean }>('GET', '/auth/me'),
+  me: () => req<{ user: User | null; devLogin: boolean; googleLogin?: boolean }>('GET', '/auth/me'),
   devLogin: (email: string, name?: string) => req<{ ok: true }>('POST', '/auth/dev', { email, name }),
   logout: () => req<{ ok: true }>('POST', '/auth/logout'),
 
@@ -48,7 +51,9 @@ export const api = {
   ensureComputer: () => req<{ computer: ComputerState }>('POST', '/computer/ensure'),
 
   apps: (search = '', category = '') => req<AppsResponse>('GET', `/apps?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`),
-  connect: (slug: string, botId?: string, seq?: number) => req<{ redirectUrl: string }>('POST', `/apps/${slug}/connect`, { botId, seq }),
+  connect: (slug: string, botId?: string, seq?: number, apiKey?: string) => req<ConnectResult>('POST', `/apps/${slug}/connect`, { botId, seq, apiKey }),
+  addCustomApp: (b: { name: string; url: string; auth: 'none' | 'oauth' | 'api_key'; apiKey?: string }) => req<ConnectResult & { slug: string }>('POST', '/apps/custom', b),
+  setAppBot: (slug: string, botId: string, enabled: boolean) => req<{ ok: true; enabled: boolean }>('PUT', `/apps/${slug}/bots/${botId}`, { enabled }),
   disconnect: (slug: string) => req<{ ok: true }>('DELETE', `/apps/${slug}`),
 
   roomMembers: (id: string) => req<{ members: RoomMember[] }>('GET', `/rooms/${id}/members`),
@@ -57,6 +62,24 @@ export const api = {
 };
 
 /** Open a Composio redirect in a centered popup. */
+/**
+ * Start connecting an app. The popup is opened before the request so the browser allows it, then
+ * either sent to the app's sign-in page or closed when no sign-in page is needed.
+ */
+export async function beginConnect(start: () => Promise<ConnectResult>): Promise<ConnectResult> {
+  const popup = openPopup('about:blank');
+  try {
+    const r = await start();
+    if (r.redirectUrl) {
+      if (popup) popup.location.href = r.redirectUrl; else window.open(r.redirectUrl, '_blank');
+    } else popup?.close();
+    return r;
+  } catch (e) {
+    popup?.close();
+    throw e;
+  }
+}
+
 export function openPopup(url: string) {
   const w = 520, h = 680;
   const left = window.screenX + (window.outerWidth - w) / 2;

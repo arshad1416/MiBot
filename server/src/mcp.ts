@@ -4,7 +4,9 @@ import { getBotRow } from './store.js';
 import { composioTools } from './composio.js';
 import { mcpToken, primaryBotId } from './engine.js';
 import { claimToolRow, enqueueBotMessage, markSilent, noteToolOutcome, requestApproval, turnDepth } from './agent/loop.js';
-import { policyFor, runComposioTool, toolMap, TOOLS, type ToolCtx } from './agent/tools.js';
+import { directTool, policyFor, runComposioTool, toolMap, TOOLS, type ToolCtx } from './agent/tools.js';
+import { callTool as callDirect, toolName } from './connectors/client.js';
+import { botConnections } from './connectors/store.js';
 
 /**
  * The app's tools, served to the Hermes engines over MCP (streamable HTTP, JSON answers only).
@@ -14,8 +16,9 @@ import { policyFor, runComposioTool, toolMap, TOOLS, type ToolCtx } from './agen
  *                         can be written before the bot exists)
  *
  * Every call is stateless: the URL says which bot is calling. Besides the app's own tools the list
- * carries the user's Composio tools, so connected apps (and the approvals around them) work the
- * same for every engine.
+ * carries the tools of every app switched on for that bot (and the user's Composio tools, when
+ * Composio is set up), so connected apps and the approvals around them work the same for every
+ * engine.
  */
 
 const DECLINED = 'The user declined this action. Do not retry it. Find another way, or tell the user what you could not do.';
@@ -40,20 +43,55 @@ function caller(slug: string, auth: string | undefined): { botId: string | null 
   return getBotRow(slug) ? { botId: slug } : null;
 }
 
+/**
+ * An agent reads this list when it starts, so an app connected later is not in the list it holds.
+ * These two tools never change and reach every connected app, whenever it was connected.
+ */
+const APP_TOOLS = [
+  {
+    name: 'list_app_tools',
+    description: 'List the tools of the apps connected for you (optionally one app), with what each does and the arguments it takes. Call this when you need a connected app and do not see its tools.',
+    inputSchema: { type: 'object', properties: { app: { type: 'string', description: 'App name, to list only that app' } } },
+  },
+  {
+    name: 'use_app_tool',
+    description: 'Run one tool of a connected app by its full name from list_app_tools (for example notion__search).',
+    inputSchema: { type: 'object', properties: { tool: { type: 'string' }, arguments: { type: 'object' } }, required: ['tool'] },
+  },
+];
+
+function describeAppTools(userId: string, botId: string, app?: string): string {
+  const wanted = app?.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const apps = botConnections(userId, botId).filter((c) => !wanted || c.slug === wanted);
+  if (!apps.length) return wanted ? `No app called "${app}" is connected for you. Use request_app_connection to ask for it.` : 'No apps are connected for you yet. Use request_app_connection to ask for one.';
+  return JSON.stringify(apps.map((c) => ({ app: c.name, tools: c.tools.map((t) => ({ name: toolName(c.slug, t.name), description: t.description, arguments: t.inputSchema })) })));
+}
+
 async function listTools(botId: string | null) {
-  const own = TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.parameters }));
+  const own = [...TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.parameters })), ...APP_TOOLS];
   const bot = botId ? getBotRow(botId) : null;
   if (!bot) return own;
   const apps = (await composioTools(bot.user_id))
-    .filter((t: any) => t?.type === 'function' && typeof t.name === 'string' && !toolMap.has(t.name))
+    .filter((t: any) => t?.type === 'function' && typeof t.name === 'string' && !toolMap.has(t.name) && !APP_TOOLS.some((a) => a.name === t.name))
     .map((t: any) => ({ name: t.name as string, description: String(t.description ?? ''), inputSchema: t.parameters ?? { type: 'object', properties: {} } }));
-  return [...own, ...apps];
+  const direct = botConnections(bot.user_id, botId!).flatMap((c) =>
+    c.tools.map((t) => ({ name: toolName(c.slug, t.name), description: `${c.name}: ${t.description}`.slice(0, 1024), inputSchema: t.inputSchema ?? { type: 'object', properties: {} } })),
+  );
+  return [...own, ...direct, ...apps];
 }
 
 async function callTool(botId: string | null, rawName: string, args: any): Promise<CallResult> {
   const bot = botId ? getBotRow(botId) : null;
   if (!botId || !bot) return text('The team app has no bot for this agent yet. Ask the user to open the app once, then try again.', true);
   const userId: string = bot.user_id;
+  if (rawName === 'list_app_tools') return text(describeAppTools(userId, botId, typeof args?.app === 'string' ? args.app : undefined));
+  if (rawName === 'use_app_tool') {
+    // From here on it is the app's own tool: same record in the chat, same approval.
+    const inner = String(args?.tool ?? '');
+    if (!directTool(userId, botId, inner)) return text(`"${inner}" is not a tool of an app connected for you. Call list_app_tools to see the names.`, true);
+    rawName = inner;
+    args = args?.arguments && typeof args.arguments === 'object' ? args.arguments : {};
+  }
   const name = [...toolMap.keys()].find((k) => k.toLowerCase() === rawName.toLowerCase()) ?? rawName;
   const rowSeq = await claimToolRow(botId, name);
   const ctx: ToolCtx = { userId, botId, enqueueBotMessage, depth: turnDepth(botId) };
@@ -66,7 +104,7 @@ async function callTool(botId: string | null, rawName: string, args: any): Promi
       return text(r.output);
     }
 
-    const pol = policyFor(userId, name, args);
+    const pol = policyFor(userId, name, args, botId);
     if (pol.decision === 'block') {
       noteToolOutcome(botId, rowSeq, { status: 'denied', summary: 'Not allowed' });
       return text(DECLINED);
@@ -74,6 +112,12 @@ async function callTool(botId: string | null, rawName: string, args: any): Promi
     if (pol.decision === 'ask') {
       const answer = await requestApproval({ userId, botId }, pol, args, rowSeq);
       if (answer !== 'allow') return text(answer === 'deny' ? DECLINED : SKIPPED);
+    }
+    const direct = directTool(userId, botId, name);
+    if (direct) {
+      const d = await callDirect(direct.connection, direct.tool.name, args);
+      noteToolOutcome(botId, rowSeq, d.ok ? { status: 'done' } : { status: 'error', summary: 'Failed' });
+      return text(d.output, !d.ok);
     }
     const r = await runComposioTool(ctx, name, args);
     noteToolOutcome(botId, rowSeq, { status: r.summary === 'failed' ? 'error' : 'done', summary: r.summary === 'failed' ? 'Failed' : undefined });

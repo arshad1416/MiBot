@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { box, displayFor } from './box.js';
+import { env } from './env.js';
 
 /**
  * The desk: what makes one screen of the shared computer look like one bot's own tidy computer.
@@ -9,15 +10,15 @@ import { box, displayFor } from './box.js';
  * home screen (the bot's avatar, a clock, the computer's apps) as Chrome's new tab page.
  *
  * The work on the computer is done by the scripts in server/box/, which this file installs under
- * /opt/hq and then calls with one short command per action. Only `box.*` is used to reach the
+ * env.boxRoot (/opt/hq by default) and then calls with one short command per action. Only `box.*` is used to reach the
  * computer, so it works the same through Orgo's API and with HQ_LOCAL=1.
  */
 
 export interface DeskBot { id: string; name: string; label: string; avatarShape: string; avatarColor: string }
 
-const ROOT = '/opt/hq';
+const ROOT = env.boxRoot;
 const SCRIPT = `${ROOT}/hq-screen.py`;
-/** Source file under server/box/ -> where it lives under /opt/hq on the computer. */
+/** Source file under server/box/ -> where it lives under ROOT on the computer. */
 const BOX_FILES: Record<string, string> = {
   'hqlib.py': 'hqlib.py',
   'hq-screen.py': 'hq-screen.py',

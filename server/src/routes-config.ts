@@ -10,7 +10,7 @@ import { env } from './env.js';
 import { emitBot, getBotRow, listRoutines, listTasks } from './store.js';
 import { computerState, readyScreen, resetBotScreen } from './computer.js';
 import { box } from './box.js';
-import { orgo } from './orgo.js';
+import { provider } from './providers/index.js';
 import { openTerminal } from './desk.js';
 import { engineHome, engineInfo, engineKind, forgetEngineOptions, restartEngine, stopOwnScreen } from './engine.js';
 import { listMemories } from './engine-memory.js';
@@ -196,9 +196,9 @@ configApi.post('/bots/:id/handback', (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- library: files under /root/grokbot/files/<botId> on the bot's computer ----------
+// ---------- library: files under <box data>/files/<botId> on the bot's computer ----------
 
-const LIB_ROOT = '/root/grokbot/files';
+const LIB_ROOT = `${env.boxData}/files`;
 
 function safeRel(p: string | undefined): string | null {
   const rel = (p ?? '').replace(/^\/+|\/+$/g, '');
@@ -250,9 +250,8 @@ configApi.post('/bots/:id/files/download', async (c) => {
   // On the computer itself the file is on our own disk: serve it directly.
   if (box.local) return c.json({ url: `/api/bots/${b.id}/files/raw?path=${encodeURIComponent(rel)}` });
   try {
-    if (!env.orgoComputerId) return c.json({ error: 'computer unavailable' }, 409);
-    const r: any = await orgo.exportFile(env.orgoComputerId, `${LIB_ROOT}/${b.id}/${rel}`);
-    const url = r?.url ?? r?.file?.url ?? r?.download_url;
+    if (!provider.id()) return c.json({ error: 'computer unavailable' }, 409);
+    const url = await provider.exportFile(`${LIB_ROOT}/${b.id}/${rel}`);
     if (!url) return c.json({ error: 'export returned no link' }, 502);
     return c.json({ url });
   } catch (e: any) {

@@ -6,6 +6,7 @@ import { TrafficLights } from './Sidebar';
 
 export function SignIn() {
   const devLogin = useStore((s) => s.devLogin);
+  const googleLogin = useStore((s) => s.googleLogin);
   const checkAuth = useStore((s) => s.checkAuth);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -28,9 +29,13 @@ export function SignIn() {
         </div>
         <h1 className="signin__title">Grokbot</h1>
         <p className="signin__sub">AI teammates with their own computers. Hand them a task and they get it done.</p>
-        <a className="btn btn--primary signin__google" href="/api/auth/google/start">
-          <GoogleG /> Sign in with Google
-        </a>
+        {googleLogin ? (
+          <a className="btn btn--primary signin__google" href="/api/auth/google/start">
+            <GoogleG /> Sign in with Google
+          </a>
+        ) : (
+          <p className="signin__sub">To sign in, run <code>scripts/sign-in-link.sh you@example.com</code> on the machine this app runs on and open the link it prints.</p>
+        )}
         {devLogin && (
           <form className="signin__dev" onSubmit={dev}>
             <div className="signin__divider"><span>Dev sign-in</span></div>

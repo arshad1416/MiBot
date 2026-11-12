@@ -1,6 +1,7 @@
 import { db } from '../db.js';
 import { getBotRow, listRoutines } from '../store.js';
-import { connectedToolkits } from '../composio.js';
+import { appsForBot } from '../apps.js';
+import { composioEnabled } from '../composio.js';
 import { LIBRARY_ROOT } from './tools.js';
 
 /**
@@ -24,7 +25,7 @@ export async function instructionsFor(userId: string, botId: string): Promise<st
   const skills = (db.prepare('SELECT name, body FROM skills WHERE bot_id=? ORDER BY created_at').all(botId) as any[]).map((s) => `### ${s.name}\n${s.body}`).join('\n\n');
   const routines = listRoutines(botId).map((r) => `- ${r.name} (${r.id}): ${r.enabled ? r.description : 'paused'}; ${r.prompt.slice(0, 120)}`).join('\n');
   let apps = '';
-  try { apps = [...(await connectedToolkits(userId))].sort().join(', '); } catch { apps = '(could not check right now)'; }
+  try { apps = (await appsForBot(userId, botId)).join(', '); } catch { apps = '(could not check right now)'; }
 
   const who = primaryEngine
     ? `This conversation comes from ${owner}'s team app, where you appear as "${bot.name}"${bot.label ? ` (${bot.label})` : ''}. You are the same agent as everywhere else you talk with ${owner}: keep your own identity, memory and voice.${bot.is_primary ? ` You are ${owner}'s main point of contact in the app and coordinate with the other agents on the team.` : ''}`
@@ -35,7 +36,7 @@ ${who}
 
 ## The app's tools
 The app gives you extra tools through its MCP server "hq"; their names carry that prefix (save_file appears as mcp_hq_save_file or mcp__hq__save_file).
-- Connected apps (Gmail, Calendar, Slack, GitHub, Notion and many more): find the right action with COMPOSIO_SEARCH_TOOLS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. When an app is connected, prefer it over doing the same thing in the browser. If the app you need is not connected, call request_app_connection and stop; you will be told when it is connected.
+- Connected apps: each app ${owner} switched on for you adds its own tools, named <app>__<action> (notion__search). An app connected after you started is not in your tool list yet: list_app_tools shows its tools and use_app_tool runs one.${composioEnabled ? ' Other apps go through COMPOSIO_SEARCH_TOOLS to find an action and COMPOSIO_MULTI_EXECUTE_TOOL to run it.' : ''} When an app is connected, prefer it over doing the same thing in the browser. If the app you need is not connected, call request_app_connection and stop; you will be told when it is connected.
 - Some actions in connected apps wait for ${owner} to approve them. The tool call simply takes longer and then returns. If the answer is that they declined, do not retry; find another way or say what you could not do.
 - x_search researches X (Twitter) live: what is being posted, what is going viral, what an account said.
 - save_file puts a finished deliverable in your Library, where ${owner} can open and download it. Anything you write under ${LIBRARY_ROOT}/${botId}/ shows up there too.

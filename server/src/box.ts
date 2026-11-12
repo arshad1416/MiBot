@@ -2,17 +2,17 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { env } from './env.js';
-import { orgo } from './orgo.js';
+import { provider, type BashResult } from './providers/index.js';
 
 /**
- * The box: the one Orgo computer every bot works on. When this server runs on that computer
- * (HQ_LOCAL=1) commands and files go straight to the local shell and disk; otherwise they go
- * through Orgo's API to ORGO_COMPUTER_ID.
+ * The box: the one computer every bot works on. When this server runs on that computer (the local
+ * provider, or HQ_LOCAL=1 on an Orgo computer) commands and files go straight to the local shell
+ * and disk; otherwise they go through the provider's API.
  */
 
-export interface BashResult { output: string; exit_code: number }
+export type { BashResult };
 
-/** Orgo screen id -> X display. The default screen is :99, "screen-100" is :100. */
+/** Screen id -> X display. The default screen is :99, "screen-100" is :100. */
 export const displayFor = (screenId?: string | null) => (!screenId || screenId === 'default' ? ':99' : `:${screenId.replace('screen-', '')}`);
 
 /** Only what a desktop command needs; none of this server's secrets. */
@@ -23,6 +23,9 @@ function shellEnv(screenId?: string | null): NodeJS.ProcessEnv {
     USER: process.env.USER ?? 'root',
     LANG: process.env.LANG ?? 'C.UTF-8',
     DISPLAY: displayFor(screenId),
+    HQ_ROOT: env.boxRoot,
+    HQ_DATA: env.boxData,
+    HQ_LOGS: env.boxLogs,
   };
 }
 
@@ -39,26 +42,24 @@ function localBash(command: string, timeoutSec: number, screenId?: string | null
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 export const box = {
-  local: env.localBox,
+  local: provider.local,
 
   /** Run a bash command on the box. `screenId` picks which screen's DISPLAY it sees. */
   async bash(command: string, timeoutSec = 60, screenId?: string | null): Promise<BashResult> {
-    if (env.localBox) return localBash(command, timeoutSec, screenId);
-    if (!env.orgoComputerId) throw new Error('ORGO_COMPUTER_ID is not set');
-    const cmd = `export DISPLAY=${displayFor(screenId)}; ${command}`;
-    const r = await orgo.bash(env.orgoComputerId, screenId ?? undefined, cmd, timeoutSec);
-    return { output: r.output ?? '', exit_code: r.exit_code ?? (r.success ? 0 : 1) };
+    if (provider.local) return localBash(command, timeoutSec, screenId);
+    const vars = `DISPLAY=${displayFor(screenId)} HQ_ROOT=${q(env.boxRoot)} HQ_DATA=${q(env.boxData)} HQ_LOGS=${q(env.boxLogs)}`;
+    return provider.bash(`export ${vars}; ${command}`, timeoutSec, screenId);
   },
 
   async writeFile(file: string, content: string | Buffer, mode = '0644'): Promise<void> {
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
-    if (env.localBox) {
+    if (provider.local) {
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, buf);
       await fs.chmod(file, parseInt(mode, 8));
       return;
     }
-    // Orgo drops very long commands, so the file goes over in base64 pieces.
+    // A remote API drops very long commands, so the file goes over in base64 pieces.
     const b64 = buf.toString('base64');
     const tmp = `${file}.b64`;
     const first = await box.bash(`mkdir -p ${q(path.dirname(file))} && : > ${q(tmp)} && echo ok`, 30);
@@ -70,7 +71,7 @@ export const box = {
 
   /** Read a file from the box, or null if it isn't there. Meant for small files (under ~4 MB). */
   async readFile(file: string): Promise<Buffer | null> {
-    if (env.localBox) {
+    if (provider.local) {
       try { return await fs.readFile(file); } catch { return null; }
     }
     const r = await box.bash(`[ -f ${q(file)} ] && base64 -w0 ${q(file)} || echo __missing__`, 60);

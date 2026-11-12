@@ -4,7 +4,20 @@ import { db } from './db.js';
 import { env } from './env.js';
 import type { Toolkit } from './types.js';
 
-export const composio = new Composio({ apiKey: env.composioKey, provider: new OpenAIResponsesProvider() });
+/** False when no COMPOSIO_API_KEY is set: the catalog is empty and nothing is connected. */
+export const composioEnabled = !!env.composioKey;
+
+type Client = Composio<OpenAIResponsesProvider>;
+let client: Client | null = null;
+
+/** The Composio client, made on first use so the server starts without a key. */
+export const composio = new Proxy({} as Client, {
+  get(_t, prop) {
+    if (!composioEnabled) throw new Error('Connected apps through Composio are off (no COMPOSIO_API_KEY).');
+    client ??= new Composio({ apiKey: env.composioKey, provider: new OpenAIResponsesProvider() });
+    return Reflect.get(client, prop);
+  },
+});
 
 const REST = 'https://backend.composio.dev/api/v3.1';
 async function rest<T = any>(path: string): Promise<T> {
@@ -19,6 +32,7 @@ type CatalogItem = Omit<Toolkit, 'connected'>;
 let catalogCache: { at: number; items: CatalogItem[] } | null = null;
 
 export async function catalog(): Promise<CatalogItem[]> {
+  if (!composioEnabled) return [];
   if (catalogCache && Date.now() - catalogCache.at < 3600_000) return catalogCache.items;
   const items: CatalogItem[] = [];
   let cursor: string | undefined;
@@ -49,6 +63,7 @@ export async function toolkitInfo(slug: string): Promise<CatalogItem | undefined
 // ---------- per-user connections ----------
 
 export async function connectedToolkits(userId: string): Promise<Set<string>> {
+  if (!composioEnabled) return new Set();
   const r = await composio.connectedAccounts.list({ userIds: [userId], statuses: ['ACTIVE'] } as any);
   const items: any[] = (r as any).items ?? [];
   return new Set(items.map((i) => i.toolkit?.slug ?? i.toolkitSlug).filter(Boolean));
@@ -95,6 +110,7 @@ export async function startConnect(userId: string, toolkit: string, callbackUrl:
 
 /** OpenAI-Responses-format function tools for this user's Composio session (meta tools). */
 export async function composioTools(userId: string): Promise<any[]> {
+  if (!composioEnabled) return [];
   try {
     const session = await sessionFor(userId);
     const tools = await session.tools();
