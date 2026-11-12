@@ -31,7 +31,8 @@ export const env = {
   serverUrl: process.env.SERVER_URL ?? `http://localhost:${process.env.PORT ?? 8787}`,
   xaiKey: req('XAI_API_KEY'),
   xaiModel: process.env.XAI_MODEL ?? 'grok-4.7',
-  composioKey: req('COMPOSIO_API_KEY'),
+  /** Empty turns the Composio app catalog off; the rest of the app runs without it. */
+  composioKey: process.env.COMPOSIO_API_KEY ?? '',
   /** Only the Orgo provider needs it. */
   orgoKey: computerProvider === 'orgo' ? secret('ORGO_API_KEY') : '',
   sessionSecret: req('SESSION_SECRET'),
