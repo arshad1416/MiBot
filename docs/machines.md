@@ -41,15 +41,23 @@ A job that is interrupted five times is given up on.
 - **Not the first Bot.** It is the Hermes agent that already runs on the hub, so its jobs always
   run there. On a hub with no agent of its own to keep (`HERMES_URL=` left empty in `.env`), the
   first Bot is like the others and can run anywhere.
-- **Model sign-ins are per machine.** An agent started by a worker inherits model settings and keys
-  from that machine's own `~/.hermes`, the same way the hub's extra Bots do.
+- **Auto.** A Bot with Auto switched on has its job's size, and the machine it would rather run on,
+  chosen for each job along with its model (README, "Auto"). A model set to run on certain machines
+  only waits for one of those; moving the job by hand overrides that.
+- **Subscription sign-ins are per machine.** An agent started by a worker inherits model settings and
+  sign-ins from that machine's own `~/.hermes`, the same way the hub's Bots do. API keys and
+  endpoints added under **Settings › Models** travel with each job, so they work on every machine.
 
 ## Setting up the hub on a machine of your own
 
 On a machine that stays on (Linux here), with Node 22, the `hermes` CLI, Xvfb, x11vnc and
-ImageMagick installed, and this repository with `npm ci` run in it:
+ImageMagick installed, and this repository with `npm ci` run in it. A window manager (xfwm4,
+openbox, marco, metacity or icewm) is started on each screen when the machine has one, which gives
+windows there a title bar; without one a sign-in window still takes the keyboard:
 
-1. Choose a model for Hermes once (`hermes model`). Each Bot's agent starts from those settings.
+1. Nothing to choose for Hermes beforehand: keys, endpoints and subscription sign-ins are added in
+   the app under **Settings › Models** once it runs. A model already chosen with `hermes model` is
+   kept, and each Bot's agent starts from it.
 2. `scripts/hub-env.sh https://<name>.<tailnet>.ts.net you@example.com` writes a first `.env`: this
    machine's own screens, no Hermes agent that already runs there, listening on `127.0.0.1` only.
    The address is the one `tailscale serve --bg 8787` gives the machine.

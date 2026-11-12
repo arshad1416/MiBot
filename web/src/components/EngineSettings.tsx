@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Bot, EngineInfo, EngineProvider } from '@shared/types';
+import { useConfigUI } from '../configStore';
 import { configApi } from '../lib/configApi';
 import { useStore } from '../store';
+import { Switch } from './config/ui';
 import { Icon } from './Icon';
 
 const KIND: Record<EngineProvider['kind'], string> = { subscription: 'Subscription', api_key: 'API key' };
@@ -86,7 +88,6 @@ export function EngineSettings({ bot }: { bot: Bot }) {
   const wantProvider = provider && provider !== (engine.provider ?? '') ? provider : undefined;
   const wantModel = model.trim() && model.trim() !== (engine.model ?? '') ? model.trim() : undefined;
   const changed = !!wantProvider || !!wantModel;
-  const openSubscriptions = providers.filter((p) => p.kind === 'subscription' && !p.connected);
   const signInTo = selected && selected.kind === 'subscription' && !selected.connected ? selected : null;
   const listId = `engine-models-${botId}`;
 
@@ -106,15 +107,23 @@ export function EngineSettings({ bot }: { bot: Bot }) {
   };
 
   const signIn = async () => {
-    if (busy) return;
+    if (busy || !signInTo) return;
     setBusy('signin'); setNote(null);
     try {
-      await configApi.engineLogin(botId, signInTo?.id);
+      await configApi.engineLogin(botId, signInTo.id);
       // The sign-in runs in a terminal on the bot's screen, so take the person there with the mouse and keyboard.
       set({ viewerOpen: true, viewerMode: 'control', viewerHint: `Finish signing in on ${bot.name}’s computer, then hand back.` });
       setSigningIn(true);
     } catch (e) { setNote(`Couldn’t start sign-in: ${(e as Error).message || 'the engine did not answer'}`); }
     finally { setBusy(null); }
+  };
+
+  const setAuto = async (on: boolean) => {
+    setNote(null);
+    try {
+      await configApi.updateBot(botId, { autoModel: on });
+      useStore.setState((s) => ({ bots: s.bots.map((b) => (b.id === botId ? { ...b, autoModel: on } : b)) }));
+    } catch (e) { setNote(`Couldn’t switch Auto: ${(e as Error).message || 'the server did not answer'}`); }
   };
 
   const restart = async () => {
@@ -135,6 +144,16 @@ export function EngineSettings({ bot }: { bot: Bot }) {
 
   return (
     <div className="panel-card engine">
+      <div className="panel-row panel-row--setting">
+        <span>Auto</span>
+        <Switch on={bot.autoModel} label={`Choose a model for each of ${bot.name}’s jobs`} onChange={setAuto} />
+      </div>
+      {bot.autoModel && (
+        <div className="engine__notice engine__notice--top">
+          <span>Each job gets a model from your list. The provider and model below are used when that choice is unsure.</span>
+          <button type="button" className="link-btn link-btn--small" onClick={() => useConfigUI.getState().openAppSettings('models')}>Models to choose from</button>
+        </div>
+      )}
       <div className="panel-row panel-row--setting">
         <span>Provider</span>
         <span className="mini-select mini-select--native engine__select">
@@ -166,10 +185,15 @@ export function EngineSettings({ bot }: { bot: Bot }) {
         <button type="button" className="btn btn--sm btn--bot" onClick={save} disabled={!changed || busy === 'save'}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
         {changed && <button type="button" className="link-btn link-btn--small" onClick={() => { dirty.current = false; setNote(null); setProvider(engine.provider ?? ''); setModel(engine.model ?? ''); }}>Undo</button>}
       </div>
-      {(signInTo || openSubscriptions.length > 0) && (
-        <button type="button" className="panel-row panel-row--action engine__signin" onClick={signIn} disabled={busy === 'signin'}>
+      {signInTo ? (
+        <button type="button" className="panel-row panel-row--action engine__signin" onClick={signIn} disabled={busy === 'signin'} title={`Signs only ${bot.name} in. Settings › Models signs every Bot in.`}>
           <Icon name="monitor" size={14} opacity={0.56} />
-          {busy === 'signin' ? 'Opening sign-in…' : signInTo ? `Sign in to ${signInTo.name}…` : 'Sign in to a subscription…'}
+          {busy === 'signin' ? 'Opening sign-in…' : `Sign in to ${signInTo.name}…`}
+        </button>
+      ) : (
+        <button type="button" className="panel-row panel-row--action engine__signin" onClick={() => useConfigUI.getState().openAppSettings('models')}>
+          <Icon name="monitor" size={14} opacity={0.56} />
+          Add a subscription, key or endpoint…
         </button>
       )}
       {engine.ownScreen && (

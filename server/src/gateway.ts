@@ -50,6 +50,42 @@ const SHARED_ENV = [
 /** Parts of the machine's own agent config a managed agent starts from, so it reaches the same models. */
 const SHARED_CONFIG = ['model', 'providers', 'custom_providers', 'auxiliary', 'fallback_model', 'fallback_providers'];
 
+/**
+ * Model access the person added in the app's settings, laid over what a home inherits from the
+ * machine: API keys as variables for `.env`, and OpenAI-compatible endpoints as entries for the
+ * `providers:` section of config.yaml.
+ */
+export interface ModelAccess {
+  env: Record<string, string>;
+  providers: Record<string, Record<string, unknown>>;
+}
+
+/** Which variables and endpoints in a home came from the app, so that taking one away in the app removes it here. */
+const accessNote = (home: string) => path.join(home, 'app-access.json');
+
+const dotenv = (vars: Record<string, string>) => Object.entries(vars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+
+/** Bring a home's keys and endpoints in line with `access`. What the user put there by hand is kept. */
+export function writeModelAccess(home: string, access: ModelAccess) {
+  let had: { env?: string[]; providers?: string[] } = {};
+  try { had = JSON.parse(fs.readFileSync(accessNote(home), 'utf8')); } catch { /* nothing from the app yet */ }
+
+  const envFile = path.join(home, '.env');
+  const vars = readDotenv(envFile);
+  for (const k of had.env ?? []) delete vars[k];
+  writePrivate(envFile, dotenv({ ...vars, ...access.env }));
+
+  const cfgFile = path.join(home, 'config.yaml');
+  const cfg = readYaml(cfgFile);
+  const providers = { ...(cfg.providers ?? {}) };
+  for (const k of had.providers ?? []) delete providers[k];
+  Object.assign(providers, access.providers);
+  if (Object.keys(providers).length) cfg.providers = providers; else delete cfg.providers;
+  writePrivate(cfgFile, YAML.stringify(cfg));
+
+  writePrivate(accessNote(home), JSON.stringify({ env: Object.keys(access.env), providers: Object.keys(access.providers) }));
+}
+
 export interface HomeSpec {
   home: string;
   /** The Hermes home that already exists on this machine; model settings and keys are inherited from it. */
@@ -65,6 +101,8 @@ export interface HomeSpec {
   display?: string | null;
   /** DevTools URL of the bot's Chrome, when it has one here. */
   cdp?: string;
+  /** Keys and endpoints from the app's settings. Left as they are in the home when not given. */
+  access?: ModelAccess;
 }
 
 /** Create or refresh the home. config.yaml is created once; after that only the keys we own are patched. Returns the API key. */
@@ -108,8 +146,24 @@ export function writeHermesHome(s: HomeSpec): string {
   }
   Object.assign(vars, { API_SERVER_ENABLED: 'true', API_SERVER_KEY: key, API_SERVER_PORT: String(s.port), API_SERVER_HOST: '127.0.0.1' });
   if (s.cdp) vars.BROWSER_CDP_URL = s.cdp; else delete vars.BROWSER_CDP_URL;
-  writePrivate(envFile, Object.entries(vars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
+  writePrivate(envFile, dotenv(vars));
+  if (s.access) writeModelAccess(s.home, s.access);
   return key;
+}
+
+/** Copy one provider's subscription sign-in from one home's auth.json into another's. False when the first home has none. */
+export function copySignIn(from: string, to: string, provider: string): boolean {
+  const read = (home: string): any => {
+    try { return JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8')); } catch { return null; }
+  };
+  const src = read(from);
+  // Hermes keeps a sign-in under `providers`, `credential_pool`, or both, depending on the provider.
+  const sections = ['providers', 'credential_pool'].filter((k) => src?.[k]?.[provider] !== undefined);
+  if (!sections.length) return false;
+  const dst = read(to) ?? { version: src.version, providers: {} };
+  for (const k of sections) dst[k] = { ...(dst[k] ?? {}), [provider]: src[k][provider] };
+  writePrivate(path.join(to, 'auth.json'), JSON.stringify(dst, null, 2));
+  return true;
 }
 
 /** The API key a home's gateway expects, or '' when the home has none yet. */

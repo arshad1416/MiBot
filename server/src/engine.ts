@@ -2,11 +2,12 @@ import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { displayFor } from './box.js';
+import { box, displayFor } from './box.js';
 import { cdpUrlFor, screenFor } from './computer.js';
 import { db } from './db.js';
 import { env } from './env.js';
-import { gatewayPid, healthy, homeKey, keyAccepted, readDotenv, spawnGateway, stopGateway, writeHermesHome } from './gateway.js';
+import { copySignIn, gatewayPid, healthy, homeKey, keyAccepted, readDotenv, spawnGateway, stopGateway, writeHermesHome, writeModelAccess } from './gateway.js';
+import { accessFor, SUBSCRIPTIONS } from './modelAccess.js';
 import type { EngineInfo, EngineProvider } from './types.js';
 
 /**
@@ -144,6 +145,7 @@ async function writeHome(botId: string): Promise<{ home: string; key: string; di
     cwd: env.localBox ? `${env.boxData}/files/${botId}` : path.join(home, 'workspace'),
     display,
     cdp,
+    access: accessFor(b.user_id),
   });
   return { home, key, display };
 }
@@ -389,5 +391,50 @@ export async function engineInfo(botId: string): Promise<EngineInfo> {
   };
 }
 
+/** The command that signs a Hermes home in to a provider: a subscription where it has one, else its API key. */
+export function signInCommand(home: string, provider: string): string {
+  const args = SUBSCRIPTIONS.find((s) => s.id === provider)?.args;
+  return `HERMES_HOME=${box.quote(home)} ${box.quote(env.hermesBin)} auth add ${provider}${args ? ` ${args}` : ''}`;
+}
+
 /** After a sign-in the provider list changes; drop what we remembered. */
 export function forgetEngineOptions(botId: string) { optionsCache.delete(botId); }
+
+// ---------- what Settings changes for all of a person's bots ----------
+
+/** The homes of this person's managed agents that exist on this machine. */
+function managedHomes(userId: string): { botId: string; home: string }[] {
+  return (db.prepare("SELECT id FROM bots WHERE user_id=? AND engine='managed'").all(userId) as { id: string }[])
+    .map((b) => ({ botId: b.id, home: homeFor(b.id) }))
+    .filter((h) => fs.existsSync(path.join(h.home, 'config.yaml')));
+}
+
+/** Lay the person's keys and endpoints into each of their agents. An agent reads them again for its next turn. */
+export function applyAccess(userId: string) {
+  const access = accessFor(userId);
+  for (const { botId, home } of managedHomes(userId)) {
+    writeModelAccess(home, access);
+    optionsCache.delete(botId);
+  }
+}
+
+/** Give each of the person's agents the sign-in the machine's own Hermes home holds for `provider`. False when it holds none. */
+export function spreadSignIn(userId: string, provider: string): boolean {
+  let found = false;
+  for (const { botId, home } of managedHomes(userId)) {
+    if (!copySignIn(env.hermesHome, home, provider)) continue;
+    found = true;
+    optionsCache.delete(botId);
+  }
+  return found;
+}
+
+/** When the machine's own Hermes home last had a sign-in written to it (0 = never). */
+export function signInsChangedAt(): number {
+  try { return fs.statSync(path.join(env.hermesHome, 'auth.json')).mtimeMs; } catch { return 0; }
+}
+
+/** Which providers the person's agents can reach, as one of them reports it. Empty while none is up. */
+export async function knownProviders(userId: string): Promise<EngineProvider[]> {
+  return toProviders(await standInOptions('', userId));
+}

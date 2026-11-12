@@ -401,6 +401,35 @@ def maximize_window(n, wid):
         run(['xdotool', 'windowmove', dec, '0', '0', 'windowsize', dec, '100%', '100%'], env=env, timeout=6)
 
 
+# A screen of the local box starts as a bare X server. With no window manager on it nothing gives a new
+# window the keyboard, a title bar or a way to close it, and the browser keeps every key for itself.
+WINDOW_MANAGERS = (('xfwm4', ['--compositor=off']), ('openbox', []), ('marco', []), ('metacity', []), ('icewm', []))
+
+
+def has_window_manager(n):
+    code, out = run(['xprop', '-root', '_NET_SUPPORTING_WM_CHECK'], env=base_env(n), timeout=6)
+    if code == 0 and 'window id #' in out:
+        return True
+    return bool(display_procs(n, tuple(name for name, _ in WINDOW_MANAGERS)))
+
+
+def start_window_manager(n):
+    """Make sure screen n has a window manager. False when this computer has none to start."""
+    if has_window_manager(n):
+        return True
+    for name, args in WINDOW_MANAGERS:
+        path = shutil.which(name)
+        if not path:
+            continue
+        pid = spawn([path] + args, screen_env(n), 'wm-%d' % int(n))
+        end = time.time() + 6
+        while time.time() < end and alive(pid):
+            if has_window_manager(n):
+                return True
+            time.sleep(0.2)
+    return False
+
+
 # ---------------------------------------------------------------- the XFCE panel
 
 def _xfconf(env, *args):
@@ -592,6 +621,7 @@ def open_terminal(n, command=None, title=None):
     if bus:
         env['DBUS_SESSION_BUS_ADDRESS'] = bus
     title = (title or 'Terminal').replace('\n', ' ')[:120]
+    managed = start_window_manager(n)
     script = None
     if command is not None:
         folder = screen_dir(n) + '/term'
@@ -607,10 +637,15 @@ def open_terminal(n, command=None, title=None):
         write_atomic(script, '#!/bin/bash\ncd "$HOME" 2>/dev/null\n%s\n' % command, 0o700)
     keep = None
     if script:
-        # The window stays open after the command ends, with one plain line saying how it went.
-        keep = ('bash -l %s; code=$?; echo; if [ "$code" -eq 0 ]; then msg="Finished. You can close this window."; '
-                'else msg="Stopped with code $code. You can close this window."; fi; '
-                'printf "\\033[2m%%s\\033[0m\\n" "$msg"; exec sleep infinity' % shlex.quote(script))
+        # Where no window manager could be started, a helper gives this window the keyboard instead.
+        focus = '' if managed else ('[ -n "$WINDOWID" ] && python3 %s "$WINDOWID" >/dev/null 2>&1 & '
+                                    % shlex.quote(ROOT + '/hq-focus.py'))
+        # The window stays open after the command ends, with one plain line saying how it went. Keys typed
+        # ahead while the command ran are dropped first, so a stray Enter does not close it unread.
+        keep = (focus + 'bash -l %s; code=$?; echo; if [ "$code" -eq 0 ]; then msg="Finished."; '
+                'else msg="Stopped with code $code."; fi; '
+                'printf "\\033[2m%%s Press Enter to close this window.\\033[0m\\n" "$msg"; '
+                'while read -r -s -t 0.05 _; do :; done; read -r -s _' % shlex.quote(script))
     xfce = shutil.which('xfce4-terminal')
     if xfce:
         argv = [xfce, '--disable-server', '--title', title, '--geometry', '104x28']
@@ -634,25 +669,37 @@ def open_terminal(n, command=None, title=None):
 def settle_window(n, pid, wait=4.0):
     """Put a freshly opened window where a person expects it: fully on the screen, in the middle."""
     size = geometry(n)
-    if not size or not shutil.which('wmctrl'):
+    if not size:
         return
+    env = base_env(n)
+    wmctrl = shutil.which('wmctrl')
     end = time.time() + wait
-    while time.time() < end:
-        mine = [w for w in windows(n) if w['pid'] == pid]
-        if mine:
-            win = mine[-1]
+    while time.time() < end and alive(pid):
+        win = None
+        if wmctrl:
+            win = ([w for w in windows(n) if w['pid'] == pid] or [None])[-1]
+        else:
+            code, out = run(['xdotool', 'search', '--onlyvisible', '--pid', str(pid)], env=env, timeout=5)
+            ids = out.split() if code == 0 else []
+            code, out = run(['xdotool', 'getwindowgeometry', '--shell', ids[-1]], env=env, timeout=5) if ids else (1, '')
+            found = dict(re.findall(r'^(WIDTH|HEIGHT)=(\d+)$', out, re.M))
+            if code == 0 and len(found) == 2:
+                win = {'id': ids[-1], 'w': int(found['WIDTH']), 'h': int(found['HEIGHT'])}
+        if win:
             w = min(win['w'], size[0] - 120)
             h = min(win['h'], size[1] - 170)
             x = max(0, (size[0] - w) // 2)
             y = max(24, (size[1] - h) // 2 - 30)
-            run(['wmctrl', '-i', '-r', win['id'], '-e', '0,%d,%d,%d,%d' % (x, y, w, h)], env=base_env(n), timeout=5)
-            return
-        if not alive(pid):
+            if wmctrl:
+                run([wmctrl, '-i', '-r', win['id'], '-e', '0,%d,%d,%d,%d' % (x, y, w, h)], env=env, timeout=5)
+            else:
+                run(['xdotool', 'windowsize', win['id'], str(w), str(h), 'windowmove', win['id'], str(x), str(y)], env=env, timeout=5)
             return
         time.sleep(0.15)
 
 
 def open_files(n):
+    start_window_manager(n)
     env = screen_env(n)
     start = DATA + '/files' if os.path.isdir(DATA + '/files') else env['HOME']
     for name in ('thunar', 'nautilus', 'nemo', 'pcmanfm', 'caja'):
@@ -680,6 +727,7 @@ def launch_app(n, app_id):
         return open_files(n)
     if app['rank'] == 2:
         return open_terminal(n)
+    start_window_manager(n)
     return spawn(app['argv'], screen_env(n), 'app-%d' % int(n), cwd=app['cwd'])
 
 
@@ -878,6 +926,7 @@ def start_browser(n, bot_id, accent=None, restart=False, log=None):
         if disp == n and udd and udd.startswith(PROFILES + '/') and udd != profile_dir(bot_id):
             say('stopping stale Chrome %d (%s) on screen %d' % (pid, udd, n))
             stop_browser(os.path.basename(udd))
+    start_window_manager(n)
     started = False
     if not running:
         prepare_profile(bot_id, accent)

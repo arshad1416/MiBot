@@ -60,6 +60,9 @@ export const env = {
   connectorCatalogDir: process.env.CONNECTOR_CATALOG_DIR ?? '',
   /** Extra MCP servers every managed bot gets, as a JSON object of Hermes `mcp_servers` entries (e.g. X's XMCP). */
   extraMcpServers: process.env.EXTRA_MCP_SERVERS ?? '',
+  /** Model routing: Jev, a decision model, is asked through OpenRouter which model a job should run on. */
+  openRouterUrl: (process.env.OPENROUTER_URL ?? 'https://openrouter.ai/api/v1').replace(/\/+$/, ''),
+  jevModel: process.env.JEV_MODEL ?? 'typesafe/jev-1.14',
   primaryBotName: process.env.PRIMARY_BOT_NAME ?? 'Doug',
   primaryBotLabel: process.env.PRIMARY_BOT_LABEL ?? 'Chief of Staff',
 

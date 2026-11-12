@@ -216,9 +216,9 @@
 .toggle.is-on .toggle__knob { background: var(--bot-on-action, #FFFFFF); }
 
 /* ---------- Settings: Machines ---------- */
-.machine-row { flex-wrap: wrap; gap: 8px; }
+.machine-row, .model-row { flex-wrap: wrap; gap: 8px; }
 .machine-row.is-off .cfg-row__text { opacity: 0.6; }
-.machine-row .cfg-row__text { flex-basis: 130px; }
+.machine-row .cfg-row__text, .model-row .cfg-row__text { flex-basis: 130px; }
 .machine-row__chip { margin-left: 8px; vertical-align: 1px; }
 .machine-row__order { display: inline-flex; gap: 2px; }
 .machine-row__order .icon-btn { width: 26px; height: 26px; font-size: 13px; color: var(--color-text-secondary); }
@@ -227,6 +227,18 @@
 .machine-row__spacer { width: 74px; flex-shrink: 0; }
 .machine-add { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .machine-add input.text-input { width: auto; flex: 1 1 180px; min-width: 0; height: 32px; }
+.model-add { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.model-add .text-input { height: 32px; }
+.model-add__wide { grid-column: 1 / -1; }
+@media (max-width: 640px) { .model-add { grid-template-columns: minmax(0, 1fr); } }
+.model-add .cfg-btn { justify-self: start; }
+select.text-input.model-add__pick { width: auto; height: 32px; padding: 0 8px; flex: 0 0 auto; }
+.model-add select.text-input { padding: 0 8px; }
+.model-add textarea.text-input { height: auto; }
+.cfg-note { padding: 8px 10px; border-radius: 8px; background: var(--color-warn-bg); color: var(--color-warn-text); font-size: 13px; line-height: 18px; }
+.auto-machines { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; line-height: 18px; color: var(--color-text-secondary); }
+.auto-machines label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.auto-machines__any { color: var(--color-text-tertiary); }
 select.text-input.machine-move { width: auto; max-width: 150px; height: 30px; padding: 0 8px; flex: 0 0 auto; }
 /* The one-time code that adds a device: QR code on the left, the letters and what to do with them on the right. */
 .pair-card { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; padding: 16px; border-radius: 12px; background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); }

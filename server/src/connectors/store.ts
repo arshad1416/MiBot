@@ -1,6 +1,5 @@
-import crypto from 'node:crypto';
 import { db, now } from '../db.js';
-import { env } from '../env.js';
+import { secretBox } from '../secretbox.js';
 import { connectorEntry, type ConnectorAuth, type ConnectorEntry } from './catalog.js';
 
 /**
@@ -56,26 +55,8 @@ export interface Connection {
   tools: ConnectorTool[];
 }
 
-const key = crypto.createHash('sha256').update(`connections:${env.sessionSecret}`).digest();
-
-function seal(value: ConnectionSecret): string {
-  const iv = crypto.randomBytes(12);
-  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const body = Buffer.concat([c.update(JSON.stringify(value), 'utf8'), c.final()]);
-  return Buffer.concat([iv, c.getAuthTag(), body]).toString('base64');
-}
-
-function open(sealed: string | null): ConnectionSecret {
-  if (!sealed) return {};
-  try {
-    const raw = Buffer.from(sealed, 'base64');
-    const d = crypto.createDecipheriv('aes-256-gcm', key, raw.subarray(0, 12));
-    d.setAuthTag(raw.subarray(12, 28));
-    return JSON.parse(Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString('utf8'));
-  } catch {
-    return {}; // SESSION_SECRET changed: the person signs in again
-  }
-}
+// A SESSION_SECRET that changed opens as nothing: the person signs in again.
+const { seal, open } = secretBox<ConnectionSecret>('connections', () => ({}));
 
 const toConnection = (r: any): Connection => ({
   userId: r.user_id, slug: r.slug, name: r.name, url: r.url, auth: r.auth, custom: !!r.custom,

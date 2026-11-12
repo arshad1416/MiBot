@@ -192,6 +192,9 @@ addColumn('bots', 'engine_port', 'INTEGER');
 addColumn('bots', 'handback_at', 'INTEGER');
 // Handoff between machines: how big this bot's jobs are ('light' may run on a small machine).
 addColumn('bots', 'weight', "TEXT NOT NULL DEFAULT 'heavy'");
+// Model routing: a bot on Auto has a model chosen for each of its jobs; the job keeps what was chosen and why (JSON, see routing.ts).
+addColumn('bots', 'auto_model', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('jobs', 'choice', 'TEXT');
 addColumn('screens', 'width', 'INTEGER');
 addColumn('screens', 'height', 'INTEGER');
 
