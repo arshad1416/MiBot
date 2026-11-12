@@ -453,7 +453,10 @@ async function* turnEvents(job: JobRow, trigger: Trigger, t: { signal: AbortSign
 
     // The screen first: the engine's browser and computer tools point at it.
     await screenForWork(getBotRow(botId).user_id, botId).catch((e) => console.warn(`[computer] screen not ready for ${botId}: ${e?.message ?? e}`));
-    const engine = await engineFor(botId);
+    // A cold agent takes a while, and its very first start sets Hermes up in its home: say so.
+    const slow = setTimeout(() => setLive(botId, { caption: 'Starting the agent. Its first start can take several minutes.' }), 4000);
+    const engine = await engineFor(botId).finally(() => clearTimeout(slow));
+    setLive(botId, { caption: null });
     if (t.signal.aborted) throw new Error('interrupted');
     const res = await fetch(`${engine.url}/v1/responses`, {
       method: 'POST',

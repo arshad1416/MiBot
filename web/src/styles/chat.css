@@ -34,6 +34,13 @@
 .transcript { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 60px 16px 16px; overflow-anchor: none; }
 .transcript__col { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 960px; margin: 0 auto; min-height: 100%; justify-content: flex-end; }
 .transcript__col > * { max-width: 100%; }
+/* The live thinking block, pinned under the header. The transcript scrolls beneath it and starts lower while it shows. */
+.thinking-dock {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 3; padding: 62px 16px 22px; pointer-events: none;
+  background: linear-gradient(180deg, var(--color-bg-chrome) calc(100% - 18px), transparent);
+}
+.thinking-dock__col { max-width: 960px; margin: 0 auto; }
+.transcript-wrap.has-dock .transcript { padding-top: 156px; }
 
 .group { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .group.is-right { align-items: flex-end; padding-top: 4px; }

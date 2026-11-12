@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -167,8 +167,39 @@ export async function stopGateway(home: string) {
   await new Promise((r) => setTimeout(r, 300));
 }
 
+/** How long a gateway may take to answer after it is started. */
+const START_MS = 90_000;
+/** The first start of a home is longer: Hermes installs its runtime into the home, which takes minutes on a slow machine. */
+const FIRST_START_MS = 20 * 60_000;
+/** Left in a home once its gateway has answered, so later starts get the short wait. */
+const startedMark = (home: string) => path.join(home, 'started-once');
+/** The pid of a start that has not answered yet. */
+const starterFile = (home: string) => path.join(home, 'starting.pid');
+
+/** Stop a start of this home that never finished (ours timed out, or the process that began it is gone). */
+async function stopStarter(home: string) {
+  let pid = NaN;
+  try { pid = Number(fs.readFileSync(starterFile(home), 'utf8').trim()); } catch { return; }
+  fs.rmSync(starterFile(home), { force: true });
+  if (!Number.isInteger(pid) || pid <= 1) return;
+  // Only if that pid is still a gateway start: the number may have gone to another process since.
+  try {
+    if (!execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).includes('gateway')) return;
+  } catch { return; }
+  // It was started detached, so it leads a process group of its own (the installer it runs included).
+  try { process.kill(-pid, 'SIGTERM'); } catch { return; }
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    try { process.kill(pid, 0); } catch { return; }
+  }
+  try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ }
+}
+
 /** Run `hermes gateway run` for a home and wait until its API answers. The process outlives this one. */
 export async function spawnGateway(o: { hermesBin: string; home: string; url: string; display?: string | null }): Promise<void> {
+  await stopStarter(o.home);
+  const first = !fs.existsSync(startedMark(o.home));
+  if (first) console.log(`[gateway] first start of ${o.home}: Hermes sets itself up there, which can take several minutes`);
   const logFile = path.join(o.home, 'logs', 'gateway.out.log');
   const log = fs.openSync(logFile, 'a');
   const child = spawn(o.hermesBin, ['gateway', 'run', '--no-supervise'], {
@@ -194,11 +225,22 @@ export async function spawnGateway(o: { hermesBin: string; home: string; url: st
   child.once('error', (e) => { exited = `could not run ${o.hermesBin}: ${e.message}`; });
   child.once('exit', (code) => { exited = `the agent stopped while starting (exit ${code}). See ${logFile}`; });
   child.unref();
+  if (child.pid) fs.writeFileSync(starterFile(o.home), String(child.pid));
 
-  for (let i = 0; i < 90; i++) {
+  const limit = first ? FIRST_START_MS : START_MS;
+  for (const end = Date.now() + limit; Date.now() < end;) {
     await new Promise((r) => setTimeout(r, 1000));
-    if (exited) throw new Error(exited);
-    if (await healthy(o.url, 1500)) return;
+    if (exited) {
+      fs.rmSync(starterFile(o.home), { force: true });
+      throw new Error(exited);
+    }
+    if (await healthy(o.url, 1500)) {
+      fs.rmSync(starterFile(o.home), { force: true });
+      if (first) fs.writeFileSync(startedMark(o.home), '');
+      return;
+    }
   }
-  throw new Error('The agent did not come up within 90 seconds.');
+  // Leave nothing half-started behind: the next try begins clean.
+  await stopStarter(o.home);
+  throw new Error(`The agent did not come up within ${first ? `${FIRST_START_MS / 60_000} minutes` : `${START_MS / 1000} seconds`}. See ${logFile}`);
 }
