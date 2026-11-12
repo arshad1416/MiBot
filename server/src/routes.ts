@@ -13,7 +13,7 @@ import { assignEngine, provisionEngine, removeEngine, syncPersona } from './engi
 import { deleteMemory, listMemories, memoryBot } from './engine-memory.js';
 import { provider } from './providers/index.js';
 import { appCatalog, appInfo, connectedApps, withBots } from './apps.js';
-import { connectedToolkits, deleteConnection, disconnect, googleProfile, startConnect, startGoogleLogin } from './composio.js';
+import { composioEnabled, connectedToolkits, deleteConnection, disconnect, googleProfile, startConnect, startGoogleLogin } from './composio.js';
 import { connectorEntry } from './connectors/catalog.js';
 import { addCustom, completeOAuth, disconnect as disconnectDirect, startConnect as startDirectConnect } from './connectors/client.js';
 import { botHas, getConnection, setBotConnection } from './connectors/store.js';
@@ -68,10 +68,11 @@ function findOrCreateUser(email: string, name?: string, preferId?: string) {
 
 api.get('/auth/me', (c) => {
   const user = userFromCookieHeader(c.req.header('cookie'));
-  return c.json({ user, devLogin: env.devLogin });
+  return c.json({ user, devLogin: env.devLogin, googleLogin: composioEnabled });
 });
 
 api.get('/auth/google/start', async (c) => {
+  if (!composioEnabled) return c.redirect(`${env.appUrl}/?login=failed`);
   const attemptId = newId('login');
   const provisional = newId('usr');
   const cb = `${env.serverUrl}/api/auth/google/callback?attempt=${attemptId}`;
