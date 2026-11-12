@@ -11,10 +11,16 @@ const TTL_MS = 30 * 24 * 3600 * 1000;
 
 export type AuthVars = { Variables: { user: User } };
 
+/** A sign-in that is used gets its 30 days again, at most once a day, so a device in regular use is never signed out. */
+const RENEW_AFTER_MS = 24 * 3600 * 1000;
+
+const sendCookie = (c: Context, t: string) =>
+  setCookie(c, COOKIE, t, { httpOnly: true, sameSite: 'Lax', secure: env.appUrl.startsWith('https:'), path: '/', maxAge: TTL_MS / 1000 });
+
 export function createSession(c: Context, userId: string) {
   const t = token();
   db.prepare('INSERT INTO auth_sessions(token,user_id,created_at,expires_at) VALUES (?,?,?,?)').run(t, userId, now(), now() + TTL_MS);
-  setCookie(c, COOKIE, t, { httpOnly: true, sameSite: 'Lax', secure: env.appUrl.startsWith('https:'), path: '/', maxAge: TTL_MS / 1000 });
+  sendCookie(c, t);
 }
 
 export function destroySession(c: Context) {
@@ -37,8 +43,11 @@ export function userFromCookieHeader(cookieHeader: string | undefined): User | n
 }
 
 export const requireUser: MiddlewareHandler<AuthVars> = async (c, next) => {
-  const u = userFromToken(getCookie(c, COOKIE));
-  if (!u) return c.json({ error: 'unauthenticated' }, 401);
+  const t = getCookie(c, COOKIE);
+  const u = userFromToken(t);
+  if (!u || !t) return c.json({ error: 'unauthenticated' }, 401);
+  const renewed = db.prepare('UPDATE auth_sessions SET expires_at=? WHERE token=? AND expires_at<?').run(now() + TTL_MS, t, now() + TTL_MS - RENEW_AFTER_MS);
+  if (renewed.changes > 0) sendCookie(c, t);
   c.set('user', u);
   await next();
 };

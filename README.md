@@ -47,6 +47,7 @@ The interface is modeled on Grok Bot. Underneath, every bot is a Hermes agent, s
 | **Voice** | Talk to a bot with xAI's realtime voice modes. Real work is handed to the same bot, with the same memory and tools. |
 | **Research on X** | Every bot has an `x_search` tool, backed by xAI. |
 | **Routines, tasks and a Library** | Recurring jobs on a schedule, a task list per bot, and a place where bots save the files they make. |
+| **An Android app** | The bot list, chat with live steps, approval cards, voice and notifications on your phone. Add the phone by scanning a code. See [the Android app](docs/android.md). |
 
 <table>
   <tr>
@@ -190,7 +191,8 @@ The e2e suite creates a temporary bot (with its own Hermes gateway and screen), 
 server/src/         API, Hermes adapter (agent/loop.ts), engines (engine.ts), MCP endpoint (mcp.ts), screens (computer.ts)
 server/box/         what runs on the computer to dress a screen (desktop, dock, home screen, Chrome)
 web/src/            chat, bot settings, app connections, computer viewer, voice
-scripts/            pack, install, Hermes config helper, sign-in link, first settings for a hub at home (hub-env.sh), run as a service (service.sh)
+android/            the Android app: core (the hub's API in plain Kotlin) and app (the screens)
+scripts/            pack, install, Hermes config helper, sign-in link, first settings for a hub at home (hub-env.sh), run as a service (service.sh), the characters and icons (gen-avatars.mjs, gen-icons.mjs)
 tests/              Playwright end-to-end test, machine handoff test
 docs/               architecture; the Orgo and xAI/Composio guides predate the Hermes engine
 ```
@@ -205,6 +207,6 @@ docs/               architecture; the Orgo and xAI/Composio guides predate the H
 
 ## License and credits
 
-Project code is available under the [MIT license](LICENSE). The bot artwork and some icons come from Grok Bot's design and remain the property of their owners, as do third-party app logos; the MIT license does not cover them. See [third-party notices](THIRD_PARTY_NOTICES.md).
+Project code is available under the [MIT license](LICENSE), and so are the bot characters, the icons and the app icon, which are MiBot's own (drawn by `scripts/gen-avatars.mjs` and `scripts/gen-icons.mjs`). Third-party app logos remain the property of their owners. See [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Continued from [grokbot-clone](https://github.com/nickvasilescu/grokbot-clone). Built with [Hermes Agent](https://github.com/NousResearch/hermes-agent), [Orgo](https://orgo.ai), [Composio](https://composio.dev), and [xAI](https://x.ai). This is an independent project, unaffiliated with xAI, Cursor/Anysphere or Nous Research.

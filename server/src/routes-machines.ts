@@ -100,6 +100,7 @@ const pairFailure = (e: unknown) => (e instanceof PairError ? { error: e.message
 
 /** What kind of device a browser is, for the line that says who used a code. */
 function deviceName(userAgent: string): string {
+  if (/^MiBot-Android/.test(userAgent)) return 'the MiBot app on an Android phone';
   if (/iPhone/.test(userAgent)) return 'an iPhone';
   if (/iPad/.test(userAgent)) return 'an iPad';
   if (/Android/.test(userAgent)) return /Mobile/.test(userAgent) ? 'an Android phone' : 'an Android tablet';
