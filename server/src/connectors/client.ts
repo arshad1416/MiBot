@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { auth as runAuth, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { env } from '../env.js';
+import { GOOGLE_TOOLS, googleAuthUrl, googleCall, googleConfigured, googleExchange, googleFresh, type GoogleTokens } from './builtin/google.js';
 import { connectorEntry, slugOf, type ConnectorAuth, type ConnectorEntry } from './catalog.js';
 import {
   connectionByState, deleteConnection, entryFor, getConnection, patchSecret, readSecret, setConnection, upsertConnection,
@@ -67,6 +68,13 @@ class StoredAuth implements OAuthClientProvider {
   }
 }
 
+/** A Google access token for this connection, renewed and saved when it has run out. */
+function googleToken(c: Connection): Promise<string> {
+  const tokens = readSecret(c.userId, c.slug).tokens as GoogleTokens | undefined;
+  if (!tokens?.access_token) throw new Error('Google Workspace is not signed in. Connect it again.');
+  return googleFresh(tokens, (next) => patchSecret(c.userId, c.slug, { tokens: next }));
+}
+
 // ---------- live sessions, kept for a few minutes between calls ----------
 
 interface Session { client: Client; timer: NodeJS.Timeout }
@@ -104,6 +112,10 @@ async function session(c: Connection): Promise<Client> {
 }
 
 async function loadTools(c: Connection): Promise<ConnectorTool[]> {
+  if (entryFor(c).builtin === 'google') {
+    await googleToken(c); // proves the sign-in works
+    return GOOGLE_TOOLS;
+  }
   const hidden = new Set(entryFor(c).excludedTools);
   const client = await session(c);
   const out: ConnectorTool[] = [];
@@ -146,6 +158,17 @@ export async function startConnect(userId: string, slug: string, opts: { apiKey?
   drop(userId, slug);
   if (opts.apiKey) patchSecret(userId, slug, { apiKey: opts.apiKey });
 
+  if (entry.builtin === 'google') {
+    if (!googleConfigured()) {
+      const error = 'Google Workspace needs your own Google Cloud OAuth client. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server, then connect again.';
+      setConnection(userId, slug, { status: 'error', error });
+      return { status: 'error', error };
+    }
+    const state = crypto.randomBytes(24).toString('base64url');
+    setConnection(userId, slug, { state });
+    return { status: 'redirect', redirectUrl: googleAuthUrl(state, OAUTH_CALLBACK) };
+  }
+
   if (entry.auth === 'oauth') {
     const provider = new StoredAuth(userId, slug, entry);
     try {
@@ -166,7 +189,8 @@ export async function completeOAuth(state: string, code: string): Promise<Connec
   const c = connectionByState(state);
   if (!c) return null;
   try {
-    await runAuth(new StoredAuth(c.userId, c.slug, entryFor(c)), { serverUrl: c.url, authorizationCode: code });
+    if (entryFor(c).builtin === 'google') patchSecret(c.userId, c.slug, { tokens: await googleExchange(code, OAUTH_CALLBACK) });
+    else await runAuth(new StoredAuth(c.userId, c.slug, entryFor(c)), { serverUrl: c.url, authorizationCode: code });
   } catch (e: any) {
     setConnection(c.userId, c.slug, { status: 'error', error: String(e?.message ?? e).slice(0, 300), state: null });
     return getConnection(c.userId, c.slug);
@@ -201,6 +225,10 @@ export function splitToolName(name: string): { slug: string; tool: string } | nu
 }
 
 export async function callTool(c: Connection, tool: string, args: Record<string, unknown>): Promise<{ output: string; ok: boolean }> {
+  if (entryFor(c).builtin === 'google') {
+    const out = JSON.stringify(await googleCall(await googleToken(c), tool, args));
+    return { output: out.length > 60000 ? `${out.slice(0, 60000)}…(truncated)` : out, ok: true };
+  }
   let result: any;
   try {
     result = await (await session(c)).callTool({ name: tool, arguments: args });

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { env } from '../env.js';
+import { GOOGLE_SLUG } from './builtin/google.js';
 
 /**
  * The direct connector catalog: MCP servers the app talks to itself, with no broker in between.
@@ -12,6 +13,9 @@ import { env } from '../env.js';
  */
 
 export type ConnectorAuth = 'oauth' | 'api_key' | 'none';
+
+/** Apps whose tools are written in this server (connectors/builtin) instead of coming from an MCP server. */
+export type Builtin = 'google';
 
 export interface ConnectorEntry {
   slug: string;
@@ -27,6 +31,7 @@ export interface ConnectorEntry {
   oauthClient?: { clientId: string; clientSecret?: string; scope?: string };
   /** What the person is asked for when auth is `api_key`. */
   keyPrompt?: string;
+  builtin?: Builtin;
 }
 
 const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -64,12 +69,20 @@ function readEntry(file: string): ConnectorEntry | null {
   };
 }
 
+/** Built in, listed whether or not a Hermes catalog is found on this machine. */
+const BUILTIN: ConnectorEntry[] = [
+  {
+    slug: GOOGLE_SLUG, name: 'Google Workspace', description: 'Gmail, Calendar and Sheets on your Google account, through Google\'s own APIs.',
+    url: 'https://www.googleapis.com/', auth: 'oauth', hosts: ['google.com'], excludedTools: [], builtin: 'google',
+  },
+];
+
 let cache: { at: number; items: ConnectorEntry[] } | null = null;
 
 /** Every direct connector found on this machine, by name. Re-read every few minutes. */
 export function connectorCatalog(): ConnectorEntry[] {
   if (cache && Date.now() - cache.at < 300_000) return cache.items;
-  const bySlug = new Map<string, ConnectorEntry>();
+  const bySlug = new Map<string, ConnectorEntry>(BUILTIN.map((e) => [e.slug, e]));
   for (const dir of catalogDirs()) {
     let names: string[] = [];
     try { names = fs.readdirSync(dir); } catch { continue; }
@@ -78,7 +91,8 @@ export function connectorCatalog(): ConnectorEntry[] {
       if (entry && !bySlug.has(entry.slug)) bySlug.set(entry.slug, entry);
     }
   }
-  cache = { at: Date.now(), items: [...bySlug.values()].sort((a, b) => a.name.localeCompare(b.name)) };
+  // Built-in apps lead; the rest follow by name.
+  cache = { at: Date.now(), items: [...bySlug.values()].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin) || a.name.localeCompare(b.name)) };
   return cache.items;
 }
 

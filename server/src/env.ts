@@ -53,6 +53,9 @@ export const env = {
   enginePortBase: Number(process.env.ENGINE_PORT_BASE ?? 8650),
   /** URL the Hermes gateways use to reach this server's MCP endpoint. */
   mcpBaseUrl: (process.env.MCP_BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 8787}`).replace(/\/+$/, ''),
+  /** Your own Google Cloud OAuth client (type "Web application"); with both set, Google Workspace can be connected. */
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
   /** A folder of Hermes MCP catalog manifests (<name>/manifest.yaml), when it is not where Hermes keeps it. */
   connectorCatalogDir: process.env.CONNECTOR_CATALOG_DIR ?? '',
   /** Extra MCP servers every managed bot gets, as a JSON object of Hermes `mcp_servers` entries (e.g. X's XMCP). */
