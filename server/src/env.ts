@@ -26,6 +26,8 @@ const hermesHome = process.env.HERMES_HOME_PRIMARY ?? path.join(os.homedir(), '.
 
 export const env = {
   port: Number(process.env.PORT ?? 8787),
+  /** The address to listen on (a Tailscale IP keeps the app off the home network). Empty = every interface. */
+  host: process.env.HOST ?? '',
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
   /** Public URL of this server, used for OAuth callbacks. */
   serverUrl: process.env.SERVER_URL ?? `http://localhost:${process.env.PORT ?? 8787}`,
