@@ -5,9 +5,11 @@ import { db, now } from './db.js';
 import { env } from './env.js';
 import { newId } from './lib/ids.js';
 import { hub } from './lib/hub.js';
-import { createSession, destroySession, isOwnerKey, requireUser, userFromCookieHeader, type AuthVars } from './lib/auth.js';
+import { createSession, destroySession, isOwnerKey, requireUser, sessionToken, userFromCookieHeader, userFromToken, type AuthVars } from './lib/auth.js';
+import { quoteOf, withQuote } from './lib/replies.js';
 import { allLive, appendRow, clearConversation, emitBot, getBot, getBotRow, getRow, listBots, listRoutines, listRows, listTasks, toRoutine, updateRow } from './store.js';
-import { enqueue, interrupt, resolveApproval } from './agent/loop.js';
+import { ApprovalGone, enqueue, interrupt, listApprovals, resolveApproval } from './agent/loop.js';
+import { describeDevice } from './lib/devices.js';
 import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen, suspendComputer } from './computer.js';
 import { assignEngine, provisionEngine, removeEngine, syncPersona } from './engine.js';
 import { deleteMemory, listMemories, memoryBot } from './engine-memory.js';
@@ -59,8 +61,11 @@ function findOrCreateUser(email: string, name?: string, preferId?: string) {
   if (existing) return { id: existing.id as string, isNew: false };
   if (env.allowedEmails.length && !env.allowedEmails.includes(email.toLowerCase())) throw new UserError('This account is not allowed to sign in here.');
   const id = preferId ?? newId('usr');
-  db.prepare('INSERT INTO users(id,email,name,created_at) VALUES (?,?,?,?)').run(id, email, name ?? email.split('@')[0], now());
-  createBot(id, { name: env.primaryBotName, label: env.primaryBotLabel, description: 'Your main point of contact. Checks in proactively and coordinates work with your other Bots.', avatarShape: 'blob', avatarColor: 'black', isPrimary: true });
+  // Together or not at all: when the team is full there is no bot for a new person, so no account is left behind either.
+  db.transaction(() => {
+    db.prepare('INSERT INTO users(id,email,name,created_at) VALUES (?,?,?,?)').run(id, email, name ?? email.split('@')[0], now());
+    createBot(id, { name: env.primaryBotName, label: env.primaryBotLabel, description: 'Your main point of contact. Checks in proactively and coordinates work with your other Bots.', avatarShape: 'blob', avatarColor: 'black', isPrimary: true });
+  })();
   return { id, isNew: true };
 }
 
@@ -157,6 +162,7 @@ api.use('/*', async (c, next) => {
 
 api.get('/events', (c) => {
   const user = c.get('user');
+  const session = sessionToken(c);
   return streamSSE(c, async (stream) => {
     const queue: string[] = [];
     let wake: (() => void) | null = null;
@@ -164,6 +170,8 @@ api.get('/events', (c) => {
     stream.onAbort(() => { unsub(); wake?.(); });
     await stream.writeSSE({ data: JSON.stringify({ type: 'hello', serverTime: now() }) });
     while (!stream.aborted) {
+      // A device that was signed out, here or from Settings, gets nothing more.
+      if (!userFromToken(session)) break;
       if (!queue.length) {
         await Promise.race([new Promise<void>((r) => (wake = r)), new Promise((r) => setTimeout(r, 20_000))]);
         wake = null;
@@ -263,13 +271,18 @@ api.get('/bots/:id/rows', (c) => {
 api.post('/bots/:id/messages', async (c) => {
   const b = ownBot(c.get('user').id, c.req.param('id'));
   if (!b) return c.json({ error: 'not found' }, 404);
-  const { text } = await c.req.json<{ text: string }>();
-  if (!text?.trim()) return c.json({ error: 'empty' }, 400);
-  const row = appendRow(b.id, 'message', { type: 'message', role: 'user', text: text.trim() });
+  const p = await c.req.json().catch(() => null);
+  const text = typeof p?.text === 'string' ? p.text.trim() : '';
+  if (!text) return c.json({ error: 'empty' }, 400);
+  // A reply to an earlier message in this conversation: quoted in the chat, and named to the agent.
+  const quoted = Number.isInteger(p?.replyTo) ? getRow(b.id, p.replyTo) : null;
+  const replyTo = quoted?.body.type === 'message' && quoted.body.text ? quoteOf(quoted.seq, quoted.body) : undefined;
+  const row = appendRow(b.id, 'message', { type: 'message', role: 'user', text, ...(replyTo ? { replyTo } : {}) });
+  const said = replyTo && quoted?.body.type === 'message' ? withQuote(text, replyTo, quoted.body.text) : text;
   // Group chats dispatch to their member Bots instead of running their own loop.
-  if (b.kind === 'room') dispatchRoomMessage(b.id, text.trim(), enqueue);
+  if (b.kind === 'room') dispatchRoomMessage(b.id, said, enqueue);
   // Any pending question card is answered by a free-text message.
-  else enqueue(b.id, { type: 'user', text: text.trim() });
+  else enqueue(b.id, { type: 'user', text: said });
   return c.json({ row });
 });
 
@@ -289,10 +302,26 @@ api.post('/bots/:id/fresh', (c) => {
   return c.json({ ok: true });
 });
 
+/** Approvals waiting for an answer; `since` (ms) adds those answered or expired since then, for a device that was away. */
+api.get('/approvals', (c) => {
+  const since = Number(c.req.query('since'));
+  return c.json({ approvals: listApprovals(c.get('user').id, Number.isFinite(since) && since > 0 ? since : undefined), serverTime: now() });
+});
+
+const DECISIONS = new Set(['once', 'allow', 'always', 'deny']);
+
 api.post('/approvals/:id', async (c) => {
-  const { decision } = await c.req.json<{ decision: 'allow' | 'always' | 'deny' }>();
-  try { resolveApproval(c.get('user').id, c.req.param('id'), decision); } catch { return c.json({ error: 'not found' }, 404); }
-  return c.json({ ok: true });
+  const p = await c.req.json().catch(() => null);
+  const decision = p && typeof p === 'object' ? (p as any).decision : undefined;
+  if (!DECISIONS.has(decision)) return c.json({ error: 'decision must be once, always or deny' }, 400);
+  try {
+    const approval = resolveApproval(c.get('user').id, c.req.param('id'), decision, describeDevice(c.req.header('user-agent') ?? '').name);
+    return c.json({ ok: true, approval });
+  } catch (e) {
+    // Answered elsewhere first, or ran out: say what happened, so the device stops offering buttons.
+    if (e instanceof ApprovalGone) return c.json({ error: e.message, approval: e.approval }, 409);
+    return c.json({ error: 'not found' }, 404);
+  }
 });
 
 api.post('/bots/:id/cards/:seq/answer', async (c) => {

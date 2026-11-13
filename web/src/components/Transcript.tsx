@@ -57,11 +57,33 @@ function cornerClass(i: number, n: number) {
   return ' is-mid';
 }
 
-const Bubble = memo(function Bubble({ row, side, pos }: { row: Row; side: 'left' | 'right'; pos: string }) {
-  const b = row.body as MessageBody;
+/** Bring an earlier message into view and flash it, from a reply's quote. */
+function showMessage(seq: number) {
+  const el = document.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('is-flashing');
+  void el.offsetWidth;
+  el.classList.add('is-flashing');
+}
+
+function Quote({ q, botName }: { q: NonNullable<MessageBody['replyTo']>; botName: string }) {
+  const who = q.name ?? (q.role === 'assistant' ? botName : 'You');
   return (
-    <div className={`bubble-wrap is-${side}`}>
+    <button type="button" className="bubble__quote" onClick={() => showMessage(q.seq)} title="Show that message">
+      <span className="bubble__quote-who">{who}</span>
+      <span className="bubble__quote-text">{q.text}</span>
+    </button>
+  );
+}
+
+const Bubble = memo(function Bubble({ row, side, pos, botName }: { row: Row; side: 'left' | 'right'; pos: string; botName: string }) {
+  const b = row.body as MessageBody;
+  const setReply = () => useStore.setState((s) => ({ replyingTo: { ...s.replyingTo, [row.botId]: row } }));
+  return (
+    <div className={`bubble-wrap is-${side}`} data-seq={row.seq}>
       <div className={`bubble is-${side === 'right' ? 'user' : 'agent'}${pos}${b.streaming ? ' is-streaming' : ''}`}>
+        {b.replyTo && <Quote q={b.replyTo} botName={botName} />}
         {side === 'right' ? <div className="bubble__plain">{b.text}</div> : <Markdown text={b.text || ' '} />}
         {b.citations && b.citations.length > 0 && (
           <div className="bubble__cites">
@@ -73,6 +95,11 @@ const Bubble = memo(function Bubble({ row, side, pos }: { row: Row; side: 'left'
           </div>
         )}
       </div>
+      {!b.streaming && (
+        <button type="button" className="bubble__reply" onClick={setReply} aria-label="Reply to this message" title="Reply to this message">
+          <Icon name="reply" size={14} opacity={0.6} />
+        </button>
+      )}
       <span className="bubble__time">{clock(row.createdAt)}</span>
     </div>
   );
@@ -265,7 +292,7 @@ export function Transcript({ bot, rows, live, loaded }: Props) {
                 <div key={it.key} className={`group is-${it.side}`}>
                   {it.from && <SenderLabel from={it.from} />}
                   {it.rows.map((r, i) => (
-                    <Fragment key={r.seq}><Bubble row={r} side={it.side} pos={cornerClass(i, it.rows.length)} /></Fragment>
+                    <Fragment key={r.seq}><Bubble row={r} side={it.side} pos={cornerClass(i, it.rows.length)} botName={bot.name} /></Fragment>
                   ))}
                 </div>
               );

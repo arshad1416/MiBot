@@ -1,4 +1,4 @@
-import type { AutoInfo, Bot, ComputerState, EngineInfo, JobInfo, LibraryFile, Machine, Memory, ModelAccessInfo, RosterModel, Routine, Skill, Task, Toolkit } from '@shared/types';
+import type { AutoInfo, Bot, ComputerState, Device, EngineInfo, JobInfo, LibraryFile, Machine, Memory, ModelAccessInfo, RosterModel, Routine, Skill, Task, Toolkit } from '@shared/types';
 import { ApiError } from './api';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -34,7 +34,7 @@ export interface ComputerDetails {
 
 export type BotPatch = Partial<Pick<Bot, 'name' | 'label' | 'description' | 'instructions' | 'avatarShape' | 'avatarColor' | 'effort' | 'mode' | 'weight' | 'autoModel'>>;
 
-export interface MachinesBundle { machines: Machine[]; jobs: JobInfo[] }
+export interface MachinesBundle { machines: Machine[]; jobs: JobInfo[]; devices: Device[] }
 export type MachinePatch = Partial<Pick<Machine, 'name' | 'takes' | 'rank' | 'enabled'>>;
 /** A one-time code that adds a device: `link` is what the QR code holds. */
 export interface PairCode { id: string; code: string; expiresInMs: number; link: string; hubUrl: string }
@@ -104,6 +104,8 @@ export const configApi = {
   pairSignIn: (code: string) => req<{ ok: true }>('POST', '/pair/sign-in', { code }),
   updateMachine: (id: string, p: MachinePatch) => req<{ machine: Machine }>('PATCH', `/machines/${id}`, p),
   removeMachine: (id: string) => req<{ ok: true }>('DELETE', `/machines/${id}`),
+  /** Signs a phone or browser out. */
+  removeDevice: (id: string) => req<{ ok: true }>('DELETE', `/devices/${id}`),
   moveJob: (id: string, machineId: string) => req<{ ok: true }>('POST', `/jobs/${id}/move`, { machineId }),
   stopJob: (id: string) => req<{ ok: true }>('POST', `/jobs/${id}/stop`),
 

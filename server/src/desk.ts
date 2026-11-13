@@ -269,37 +269,38 @@ function wallpaperSvg(p: Palette, seed: string): string {
 
 // ---------------------------------------------------------------- avatar
 
-interface ShapeDef { viewBox: string; d: string; outline: string }
-/** Older shape names the web app also maps onto the drawn set. */
-const SHAPE_FALLBACK: Record<string, string> = {
-  bean: 'teardrop', squircle: 'square', capsule: 'tablet', cylinder: 'tablet', gem: 'hex', crystal: 'hex',
-  shield: 'house', dome: 'house', arch: 'house', leaf: 'teardrop',
-};
-let shapesCache: Record<string, ShapeDef> | null = null;
+interface ShapeDef { body: string; face: [number, number, number] }
+interface Face { width: number; height: number; eyeGap: number; eyeRadius: number }
+let artCache: { shapes: Record<string, ShapeDef>; face: Face } | null = null;
 
-/** The avatar art lives in the web app; read it as text so the server needs no build step for it. */
-function shapes(): Record<string, ShapeDef> {
-  if (shapesCache) return shapesCache;
-  shapesCache = {};
+/** The characters live in the web app (written by scripts/gen-avatars.mjs); read them as text so the server needs no build step for them. */
+function art(): { shapes: Record<string, ShapeDef>; face: Face } | null {
+  if (artCache) return artCache;
   try {
     const text = fs.readFileSync(new URL('../../web/src/avatar/shapes.gen.ts', import.meta.url), 'utf8');
+    const face = /FACE = (\{[^}]*\})/.exec(text)?.[1];
     const start = text.indexOf('{', text.indexOf('SHAPES'));
     const end = text.lastIndexOf('}');
-    if (start > 0 && end > start) shapesCache = JSON.parse(text.slice(start, end + 1)) as Record<string, ShapeDef>;
+    if (face && start > 0 && end > start) artCache = { face: JSON.parse(face) as Face, shapes: JSON.parse(text.slice(start, end + 1)) as Record<string, ShapeDef> };
   } catch {
     warn('avatar shapes not found, using a plain circle');
   }
-  return shapesCache;
+  return artCache;
 }
 
 function avatarSvg(shape: string, fill: string): string {
-  const all = shapes();
-  const def = all[shape] ?? all[SHAPE_FALLBACK[shape] ?? 'blob'] ?? all.blob;
-  const safe = (s: string) => /^[\w\s.,\-+]*$/.test(s);
-  if (!def || !safe(def.d) || !safe(def.outline) || !safe(def.viewBox)) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff"/><circle cx="24" cy="24" r="19" fill="${fill}"/></svg>`;
+  const a = art();
+  const def = a?.shapes[shape] ?? a?.shapes.blob;
+  if (!a || !def || !/^[\w\s.,\-+]*$/.test(def.body)) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" fill="${fill}"/></svg>`;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${def.viewBox}"><path d="${def.outline}" fill="#fff"/><path d="${def.d}" fill="${fill}" fill-rule="evenodd"/></svg>`;
+  const [x, y, s] = def.face;
+  const w = a.face.width * s, h = a.face.height * s;
+  // On a dark body the visor is the light part, so the face still reads.
+  const n = parseInt(fill.slice(1, 7), 16);
+  const dark = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.3;
+  const eyes = [-1, 1].map((side) => `<circle cx="${x + side * a.face.eyeGap * s}" cy="${y}" r="${a.face.eyeRadius * s}" fill="${dark ? '#16171A' : '#fff'}"/>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="${def.body}" fill="${fill}"/><rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${h / 2}" fill="${dark ? '#F2F2F2' : '#16171A'}"/>${eyes}</svg>`;
 }
 
 // ---------------------------------------------------------------- the look of one screen

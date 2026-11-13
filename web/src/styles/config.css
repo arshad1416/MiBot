@@ -180,6 +180,23 @@
 .app-settings__head h1 { margin: 0; font-size: 22px; font-weight: 600; line-height: 28px; letter-spacing: -0.2px; color: var(--color-text-primary); }
 .app-settings__head p { margin: 6px 0 0; font-size: 13px; line-height: 19px; color: var(--color-text-tertiary); }
 .app-settings .cfg-card { background: var(--color-bg-chrome); }
+/* A phone: the sections become a row along the top that scrolls sideways. */
+@media (max-width: 640px) {
+  .app-settings { flex-direction: column; }
+  .app-settings__nav { flex-direction: row; align-items: center; gap: 4px; width: auto; padding: 8px 12px; overflow-x: auto; scrollbar-width: none; border-right: 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .app-settings__nav::-webkit-scrollbar { display: none; }
+  .app-settings__back { margin: 0 4px 0 0; flex-shrink: 0; }
+  .app-settings__heading, .app-settings .app-settings__close { display: none; }
+  .app-settings__nav .cfg-nav__item { width: auto; flex-shrink: 0; white-space: nowrap; border-radius: var(--radius-full); }
+  .app-settings__page { gap: 22px; padding: 20px 16px 48px; }
+  /* A row's name and status take the whole line; its controls sit on the line below. */
+  .machine-row .cfg-row__text, .model-row .cfg-row__text { flex-basis: 100%; }
+  .machine-row .cfg-seg { flex-wrap: nowrap; }
+  .machine-row__spacer { display: none; }
+  .machine-row > .cfg-btn, .machine-row > button:last-child { margin-left: auto; }
+}
+.app-settings--embedded .app-settings__nav { display: none; }
+.app-settings--embedded .app-settings__page { padding-top: 16px; }
 
 .computer-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin: 0 4px; background: var(--color-text-quaternary); }
 .computer-status-dot.is-on { background: var(--color-success); box-shadow: 0 0 0 4px var(--color-success-bg); }

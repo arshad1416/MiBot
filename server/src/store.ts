@@ -5,6 +5,9 @@ import { Cron } from 'croner';
 
 // ---------- bots ----------
 
+/** How a bot's last line reads when it is an approval card, by what became of the request. */
+const APPROVAL_PREVIEW: Record<string, string> = { allowed: 'Approved', always: 'Approved', denied: 'Denied', expired: 'Expired' };
+
 export function toBot(r: any): Bot {
   const last = db
     .prepare("SELECT body, created_at FROM rows WHERE bot_id=? AND generation=? AND kind IN ('message','card','event') ORDER BY seq DESC LIMIT 1")
@@ -13,7 +16,7 @@ export function toBot(r: any): Bot {
   if (last) {
     const b = JSON.parse(last.body) as RowBody;
     lastPreview =
-      b.type === 'message' ? b.text : b.type === 'card' ? (b.card === 'approval' ? `Waiting for you: ${b.title}` : b.card === 'question' ? b.question : b.card === 'connect' ? `Connect ${b.toolkitName}` : 'Draft') : b.type === 'event' ? b.text : null;
+      b.type === 'message' ? b.text : b.type === 'card' ? (b.card === 'approval' ? `${APPROVAL_PREVIEW[b.status] ?? 'Waiting for you'}: ${b.title}` : b.card === 'question' ? b.question : b.card === 'connect' ? `Connect ${b.toolkitName}` : 'Draft') : b.type === 'event' ? b.text : null;
   }
   return {
     id: r.id,

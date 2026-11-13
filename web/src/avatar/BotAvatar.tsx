@@ -1,16 +1,10 @@
 import type { AvatarColor, AvatarShape, Bot } from '@shared/types';
 import { palette } from '../lib/colors';
 import { Icon } from '../components/Icon';
-import { SHAPES, type ShapeDef } from './shapes.gen';
-
-/** Shapes without an exported SVG fall back to the closest silhouette we have. */
-const FALLBACK: Partial<Record<AvatarShape, string>> = {
-  bean: 'teardrop', squircle: 'square', capsule: 'tablet', cylinder: 'tablet', gem: 'hex', crystal: 'hex',
-  shield: 'house', dome: 'house', arch: 'house', leaf: 'teardrop',
-};
+import { FACE, SHAPES, type ShapeDef } from './shapes.gen';
 
 export function shapeDef(shape: AvatarShape | string): ShapeDef {
-  return SHAPES[shape] ?? SHAPES[FALLBACK[shape as AvatarShape] ?? 'blob'] ?? SHAPES.blob;
+  return SHAPES[shape] ?? SHAPES.blob;
 }
 
 /** Shapes offered in the Create New Bot picker, in the design's order (rows of 5/5/3). */
@@ -19,32 +13,46 @@ export const PICKER_SHAPES: AvatarShape[] = ['blob', 'cloud', 'square', 'sparkle
 interface Props {
   shape: AvatarShape | string;
   color: AvatarColor | string;
-  /** Slot size in px. The drawing overflows the slot by the design's 1.533x ratio. */
+  /** Slot size in px. The drawing overflows the slot a little, so the body fills it. */
   size: number;
   star?: boolean;
-  /** Selected-shape ring (white gap + gray outline following the silhouette). */
+  /** Selected-shape ring (a gap, then a gray outline following the silhouette). */
   ring?: boolean;
   className?: string;
   title?: string;
 }
 
-const OVERDRAW = 55.2 / 36;
+/** The characters are drawn in a 100 x 100 box with a margin around the body. */
+const BOX = 100;
+const OVERDRAW = 1.16;
+const VISOR_DARK = '#16171A';
+const VISOR_LIGHT = '#F2F2F2';
 
+/** True for a body colour dark enough that the visor has to be the light part. */
+function isDark(hex: string): boolean {
+  const n = parseInt(hex.slice(1, 7), 16);
+  return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.3;
+}
+
+/** A bot's character: a body in the bot's colour and a visor with two lit eyes (see scripts/gen-avatars.mjs). */
 export function BotAvatar({ shape, color, size, star, ring, className, title }: Props) {
   const def = shapeDef(shape);
   const draw = size * OVERDRAW;
   const off = (draw - size) / 2;
   const fill = palette(color).fill;
-  // Stroke widths in viewBox units: viewBox width maps to `draw` px.
-  const vbw = Number(def.viewBox.split(/\s+/)[2]);
-  const px = vbw / draw;
+  const dark = isDark(fill);
+  const [x, y, s] = def.face;
+  const w = FACE.width * s, h = FACE.height * s;
+  // Stroke widths in box units: the box maps to `draw` px.
+  const px = BOX / draw;
   return (
     <span className={`bot-avatar ${className ?? ''}`} style={{ width: size, height: size }} title={title} role="img" aria-label={title}>
-      <svg width={draw} height={draw} viewBox={def.viewBox} style={{ position: 'absolute', left: -off, top: -off, overflow: 'visible' }} aria-hidden>
-        {ring && <path d={def.outline} fill="#1C1C1C3D" stroke="#1C1C1C3D" strokeWidth={px * 2 * 3.4} strokeLinejoin="round" />}
-        {ring && <path d={def.outline} fill="#FFFFFF" stroke="#FFFFFF" strokeWidth={px * 2 * 2.4} strokeLinejoin="round" />}
-        <path d={def.outline} fill="#FFFFFF" />
-        <path d={def.d} fill={fill} fillRule="evenodd" />
+      <svg width={draw} height={draw} viewBox={`0 0 ${BOX} ${BOX}`} style={{ position: 'absolute', left: -off, top: -off, overflow: 'visible' }} aria-hidden>
+        {ring && <path d={def.body} fill="#1C1C1C3D" stroke="#1C1C1C3D" strokeWidth={px * 2 * 3.4} strokeLinejoin="round" />}
+        {ring && <path d={def.body} fill="#FFFFFF" stroke="#FFFFFF" strokeWidth={px * 2 * 2.4} strokeLinejoin="round" />}
+        <path d={def.body} fill={fill} />
+        <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={h / 2} fill={dark ? VISOR_LIGHT : VISOR_DARK} />
+        {[-1, 1].map((side) => <circle key={side} cx={x + side * FACE.eyeGap * s} cy={y} r={FACE.eyeRadius * s} fill={dark ? VISOR_DARK : '#FFFFFF'} />)}
       </svg>
       {star && (
         <span className="bot-avatar__star" style={{ width: size * 0.2667, height: size * 0.2667 }}>

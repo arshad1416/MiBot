@@ -99,6 +99,9 @@ already signed in, either scan the QR code with the phone's camera and press **S
 device**, or open the app's address on the other device, choose **Sign in with a code from it** and
 type the code. `scripts/sign-in-link.sh` is still there for the very first sign-in.
 
+The [Android app](android.md) is added the same way: press **Scan the code** in the app and point
+the phone at the QR code.
+
 A handful of wrong codes closes pairing for ten minutes and cancels the codes that were open.
 
 ## Keeping a small machine small

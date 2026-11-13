@@ -70,6 +70,17 @@ export interface MessageBody {
   /** Set when a message came from another bot, a routine or a voice call rather than the user typing. */
   from?: { kind: 'bot' | 'routine' | 'voice'; id: string; name: string };
   citations?: { url: string; title?: string }[];
+  /** The earlier message this one answers, quoted as it was when the reply was sent. */
+  replyTo?: MessageQuote;
+}
+
+/** A short quote of an earlier message, for a reply. */
+export interface MessageQuote {
+  seq: number;
+  role: 'user' | 'assistant';
+  /** Who said it, when it was not the person or this Bot (another Bot, a routine). */
+  name?: string;
+  text: string;
 }
 
 export interface ToolCallBody {
@@ -180,6 +191,19 @@ export interface Memory { id: string; botId: string; text: string; createdAt: nu
 export interface Skill { id: string; botId: string; name: string; description: string; body: string; createdAt: number; updatedAt: number }
 
 export type JobWeight = 'light' | 'heavy';
+
+/** A phone, tablet or browser that is signed in. It runs no jobs. */
+export interface Device {
+  id: string;
+  /** What it said it is, such as "iPhone · Safari". */
+  name: string;
+  kind: 'phone' | 'tablet' | 'computer';
+  signedInAt: number;
+  /** Null for a sign-in that has not been used since devices were first listed. */
+  lastUsedAt: number | null;
+  /** The device that asked. */
+  current: boolean;
+}
 
 /** A machine that can run bots' jobs: the hub (where this server runs) or another one running the worker. */
 export interface Machine {
@@ -340,6 +364,33 @@ export interface Toolkit {
   bots?: string[];
 }
 
+/**
+ * A request a Bot made that waits for the person: everything a phone or the Mac app needs to show
+ * it and answer it, without the conversation it sits in.
+ */
+export interface Approval {
+  id: string;
+  botId: string;
+  botName: string;
+  /** "Allow Scout to send an email?" */
+  title: string;
+  /** What it will do, a line per argument. */
+  detail: string;
+  /** The tool's name, such as gmail_send_email. */
+  tool: string;
+  toolkitName?: string;
+  args: unknown;
+  /** The row in the conversation that shows it. */
+  rowSeq: number;
+  status: 'pending' | 'allowed' | 'always' | 'denied' | 'expired';
+  createdAt: number;
+  /** When it stops waiting; after that it is expired whatever happens. */
+  expiresAt: number;
+  resolvedAt: number | null;
+  /** The device that answered it, such as "MiBot app on Android (CPH2655)". */
+  resolvedBy: string | null;
+}
+
 /** Server-sent events on GET /api/events */
 export type ServerEvent =
   | { type: 'hello'; serverTime: number }
@@ -354,4 +405,6 @@ export type ServerEvent =
   | { type: 'memories'; botId: string }
   | { type: 'connections' }
   | { type: 'machines' }
+  /** One approval changed: it was asked for, answered or ran out. Each device updates its copy. */
+  | { type: 'approval'; approval: Approval }
   | { type: 'ping' };

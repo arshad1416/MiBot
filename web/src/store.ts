@@ -24,6 +24,8 @@ interface State {
   sseConnected: boolean;
 
   detailsOpen: boolean;
+  /** The message the composer is replying to, per bot. */
+  replyingTo: Record<string, Row | undefined>;
   sidebarCollapsed: boolean;
   modal: ModalKind;
   viewerOpen: boolean;
@@ -64,6 +66,7 @@ export const useStore = create<State>((set, get) => ({
   connectionsVersion: 0,
   sseConnected: false,
   detailsOpen: lsGet(LS_DETAILS) !== '0',
+  replyingTo: {},
   sidebarCollapsed: lsGet(LS_SIDEBAR) === '1',
   modal: null,
   viewerOpen: false,

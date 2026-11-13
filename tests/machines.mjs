@@ -48,50 +48,12 @@ const jevServer = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ answers, usage: { input_tokens: 1, output_tokens: 0, cost: 0 } }));
 }).listen(18796, '127.0.0.1');
 
-// ---------- a stand-in for `hermes gateway run` ----------
-// Each "tool call" takes `delay` ms; the last "steps=N delay=M" in the input sets the pace.
+// ---------- a stand-in for `hermes gateway run` (tests/stub-hermes.mjs) ----------
 // While the file `slow-start` exists, a gateway that is starting does not answer yet.
-// `hermes auth add <provider>` signs its home in at once.
-fs.writeFileSync(path.join(dir, 'stub-hermes.mjs'), `
-import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
-const home = process.env.HERMES_HOME;
-if (process.argv[2] === 'auth') {
-  fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ version: 1, providers: { [process.argv[4]]: { token: 'signed-in' } } }));
-  process.exit(0);
-}
-const env = Object.fromEntries(fs.readFileSync(path.join(home, '.env'), 'utf8').split('\\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
-fs.writeFileSync(path.join(home, 'gateway.pid'), JSON.stringify({ pid: process.pid, hermes_home: home }));
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-while (fs.existsSync(${JSON.stringify(path.join(dir, 'slow-start'))})) await sleep(200);
-http.createServer(async (req, res) => {
-  if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok', version: 'stub' }));
-  if (req.headers.authorization !== 'Bearer ' + env.API_SERVER_KEY) { res.statusCode = 401; return res.end('{}'); }
-  if (req.url === '/api/model/options') return res.end(JSON.stringify({ provider: 'openai-codex', model: 'stub-large', providers: [{ slug: 'openai-codex', name: 'ChatGPT', auth_type: 'oauth', authenticated: true, featured_models: ['stub-large', 'stub-small'] }] }));
-  if (req.url !== '/v1/responses') return res.end('{"data":[]}');
-  let raw = '';
-  for await (const c of req) raw += c;
-  const body = JSON.parse(raw);
-  fs.appendFileSync(path.join(home, 'requests.log'), JSON.stringify({ input: body.input, model: body.model, provider: body.provider }) + '\\n');
-  const last = (re) => [...body.input.matchAll(re)].pop()?.[1];
-  const steps = Number(last(/steps=(\\d+)/g) ?? 2);
-  const delay = Number(last(/delay=(\\d+)/g) ?? 100);
-  res.writeHead(200, { 'content-type': 'text/event-stream' });
-  const send = (type, data) => res.write('event: ' + type + '\\ndata: ' + JSON.stringify({ type, ...data }) + '\\n\\n');
-  for (let i = 1; i <= steps; i++) {
-    const id = 'c' + Date.now() + i;
-    send('response.output_item.added', { item: { type: 'function_call', call_id: id, name: 'terminal', arguments: JSON.stringify({ command: 'echo step ' + i }) } });
-    await sleep(delay);
-    send('response.output_item.done', { item: { type: 'function_call_output', call_id: id, output: 'step ' + i } });
-  }
-  send('response.output_text.delta', { delta: 'Finished ' + steps + ' steps.' });
-  send('response.output_item.done', { item: { type: 'message', content: [{ text: 'x' }] } });
-  res.end();
-}).listen(Number(env.API_SERVER_PORT), '127.0.0.1');
-`);
+const stub = path.join(repo, 'tests', 'stub-hermes.mjs');
+const slowStart = path.join(dir, 'slow-start');
 const hermes = path.join(dir, 'hermes');
-fs.writeFileSync(hermes, `#!/bin/bash\nexec "${process.execPath}" "${path.join(dir, 'stub-hermes.mjs')}" "$@"\n`, { mode: 0o755 });
+fs.writeFileSync(hermes, `#!/bin/bash\nSTUB_SLOW_START="${slowStart}" exec "${process.execPath}" "${stub}" "$@"\n`, { mode: 0o755 });
 
 function start(name, cmd, args, env) {
   const log = fs.openSync(path.join(dir, `${name}.log`), 'a');
@@ -132,7 +94,7 @@ try {
   const primary = path.join(dir, 'primary');
   fs.mkdirSync(primary);
   fs.writeFileSync(path.join(primary, '.env'), 'API_SERVER_PORT=18792\nAPI_SERVER_KEY=pk\n');
-  start('primary', process.execPath, [path.join(dir, 'stub-hermes.mjs')], { HERMES_HOME: primary });
+  start('primary', process.execPath, [stub], { HERMES_HOME: primary });
   const tsx = path.join(repo, 'node_modules', '.bin', 'tsx');
   start('hub', tsx, ['src/index.ts'], {
     PORT: '18791', HOST: '127.0.0.1', XAI_API_KEY: 'x', SESSION_SECRET: 'test-secret-test-secret', DEV_LOGIN: '1', COMPUTER_PROVIDER: 'local',
@@ -215,8 +177,20 @@ try {
   const me = await (await fetch(`${HUB}/api/auth/me`, { headers: { cookie: phoneCookie } })).json();
   check('a phone signs in with a code', signIn.ok && me.user?.email === 'test@example.com' && (await api('GET', `/pair/codes/${phoneCode.id}`)).deviceName === 'an iPhone');
 
+  // It is listed with the other signed-in devices, and signing it out there ends its sign-in and its live events.
+  const devices = (await api('GET', '/machines')).devices;
+  const phone = devices.find((d) => d.name === 'iPhone');
+  check('a signed-in phone is listed, after the device that asked', devices[0].current && phone?.kind === 'phone' && !phone.current && !JSON.stringify(devices).includes(phoneCookie.split('=')[1]));
+  const live = await fetch(`${HUB}/api/events`, { headers: { cookie: phoneCookie } });
+  const signedOut = await api('DELETE', `/devices/${phone.id}`);
+  const after = await fetch(`${HUB}/api/auth/me`, { headers: { cookie: phoneCookie } });
+  let closed = false;
+  const reader = live.body.getReader();
+  await until('the phone’s live events to end', async () => { closed ||= (await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r({}), 200))])).done === true; return closed; });
+  check('signing a device out ends its sign-in', signedOut.ok && (await after.json()).user == null && !(await api('GET', '/machines')).devices.some((d) => d.id === phone.id));
+  check('nobody can sign out a device that is not theirs', (await api('DELETE', '/devices/dev_nope')).error === 'not found');
+
   // A new bot's agent can take minutes to start; its model list is there meanwhile, from the agent that is up.
-  const slowStart = path.join(dir, 'slow-start');
   fs.writeFileSync(slowStart, '');
   const { bot: newcomer } = await api('POST', '/bots', { name: 'Newcomer' });
   const engine = async () => (await api('GET', `/bots/${newcomer.id}/engine`)).engine;
@@ -292,11 +266,30 @@ try {
   const alone = await run('after hours');
   check('a job goes ahead when Jev cannot be reached', alone.choice.by === 'bot' && said(await rows(bot.id), 'Jev could not be asked'));
 
-  // Guessing closes pairing for a while, the open codes included.
+  // A reply to one earlier message: quoted in the chat, and named to the agent.
+  const all = (await api('GET', `/bots/${bot.id}/rows`)).rows;
+  const answered = all.filter((r) => r.body.type === 'message' && r.body.role === 'assistant').at(-2);
+  const sentReply = (await api('POST', `/bots/${bot.id}/messages`, { text: 'more on this one steps=1', replyTo: answered.seq })).row;
+  check('a reply keeps a quote of the message it answers', sentReply.body.replyTo?.seq === answered.seq && sentReply.body.replyTo.role === 'assistant' && sentReply.body.text === 'more on this one steps=1');
+  await until('the reply to be worked on', async () => [laptopHome, path.join(dir, 'hub-engines', bot.id)].some((h) => { try { return read(h, 'requests.log').includes('more on this one'); } catch { return false; } }));
+  const told = [laptopHome, path.join(dir, 'hub-engines', bot.id)].map((h) => { try { return read(h, 'requests.log'); } catch { return ''; } }).join('');
+  check('the agent is told which message is being answered', told.includes(`[Replying to your earlier message: \\"${answered.body.text.slice(0, 20)}`));
+  const loose = (await api('POST', `/bots/${bot.id}/messages`, { text: 'no such message', replyTo: 999999 })).row;
+  check('a reply to a message that is not there is sent as a plain message', loose && !loose.body.replyTo);
+
+  // Guessing shuts the guesser out for a while, and nobody else: the code still works from another address.
   const openCode = await api('POST', '/pair/codes', {});
-  const guess = (code) => fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  const guess = (code, headers = {}) => fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ code }) });
   for (let i = 0; i < 10; i++) await guess('ZZZZZZZ' + (i % 8 + 2));
-  check('too many wrong codes close pairing', (await guess(openCode.code)).status === 400 && (await api('GET', `/pair/codes/${openCode.id}`)).state === 'expired');
+  check('too many wrong codes shut the guesser out', (await guess(openCode.code)).status === 400 && (await api('GET', `/pair/codes/${openCode.id}`)).state === 'open');
+  check('a page on another site cannot hand in a code', (await guess(openCode.code, { 'x-forwarded-for': '100.64.0.9', origin: 'https://elsewhere.example' })).status === 403);
+  for (const body of ['null', '{"code":12345678}', '{"code":["A"]}', '']) {
+    const res = await fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '100.64.0.9' }, body });
+    if (res.status !== 400) check(`a body of ${body || 'nothing'} is turned down politely`, false);
+  }
+  check('and the owner’s code still works from elsewhere', (await guess(openCode.code, { 'x-forwarded-for': '100.64.0.9' })).status === 200);
+  const odd = await fetch(`${HUB}/api/auth/me`, { headers: { cookie: 'grokbot_session=%E0%A4%A' } });
+  check('a cookie that does not decode is nobody’s', odd.status === 200 && (await odd.json()).user === null);
 } catch (e) {
   console.error(`FAIL  ${e.message}`);
   failed = true;

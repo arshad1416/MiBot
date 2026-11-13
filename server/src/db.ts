@@ -197,5 +197,13 @@ addColumn('bots', 'auto_model', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('jobs', 'choice', 'TEXT');
 addColumn('screens', 'width', 'INTEGER');
 addColumn('screens', 'height', 'INTEGER');
+// Signed-in devices, for the list in Settings: a public id (the token stays secret), what the device said it is, and when it last asked for something.
+addColumn('auth_sessions', 'id', 'TEXT');
+addColumn('auth_sessions', 'user_agent', 'TEXT');
+addColumn('auth_sessions', 'last_used_at', 'INTEGER');
+// Approvals answered from any device: when one stops waiting, and which device answered it.
+addColumn('approvals', 'expires_at', 'INTEGER');
+addColumn('approvals', 'resolved_by', 'TEXT');
+db.exec("UPDATE auth_sessions SET id = 'dev_' || lower(hex(randomblob(9))) WHERE id IS NULL");
 
 export const now = () => Date.now();

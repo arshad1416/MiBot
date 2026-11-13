@@ -1,6 +1,8 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { env } from './env.js';
-import { createSession, requireUser, type AuthVars } from './lib/auth.js';
+import { createSession, listDevices, removeDevice, requireUser, sessionToken, type AuthVars } from './lib/auth.js';
+import { describeDevice } from './lib/devices.js';
 import { moveJob, stopJob } from './agent/loop.js';
 import { getJob, openJobs } from './jobs.js';
 import { checkIn, createMachine, deleteMachine, listMachines, machineByToken, takeEvents, updateMachine, type MachineRow } from './machines.js';
@@ -8,18 +10,18 @@ import { createPairCode, PairError, pairStatus, redeemPairCode } from './pairing
 import { getBotRow } from './store.js';
 
 /**
- * Machines and the jobs waiting on them, for the app; the two calls a worker on another machine
+ * Machines, signed-in devices and the jobs waiting on machines, for the app; the two calls a worker on another machine
  * makes to this server; and pairing, which brings a new device in with a code. Mounted in index.ts.
  */
 
 // ---------- for the signed-in user ----------
 
 export const machinesApi = new Hono<AuthVars>();
-for (const p of ['/machines', '/machines/*', '/jobs/*']) machinesApi.use(p, requireUser);
+for (const p of ['/machines', '/machines/*', '/devices/*', '/jobs/*']) machinesApi.use(p, requireUser);
 
 machinesApi.get('/machines', (c) => {
   const userId = c.get('user').id;
-  return c.json({ machines: listMachines(userId), jobs: openJobs(userId) });
+  return c.json({ machines: listMachines(userId), jobs: openJobs(userId), devices: listDevices(userId, sessionToken(c)) });
 });
 
 machinesApi.post('/machines', async (c) => {
@@ -35,6 +37,9 @@ machinesApi.patch('/machines/:id', async (c) => {
 
 machinesApi.delete('/machines/:id', (c) =>
   deleteMachine(c.get('user').id, c.req.param('id')) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
+
+machinesApi.delete('/devices/:id', (c) =>
+  removeDevice(c.get('user').id, c.req.param('id')) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
 
 const ownJob = (userId: string, id: string) => {
   const job = getJob(id);
@@ -83,9 +88,38 @@ workerApi.post('/jobs/:id/events', async (c) => {
 export const pairApi = new Hono<AuthVars>();
 for (const p of ['/codes', '/codes/*']) pairApi.use(p, requireUser);
 
+const OWN_ORIGINS = new Set([env.appUrl, env.serverUrl].map((u) => new URL(u).origin));
+
+// A page on another site, open in the owner's browser, must not be able to hand in codes in their name.
+pairApi.use('/*', async (c, next) => {
+  const origin = c.req.header('origin');
+  if (c.req.method !== 'GET' && origin && !OWN_ORIGINS.has(origin)) return c.json({ error: 'not allowed from this page' }, 403);
+  await next();
+});
+
+/** A request's JSON body as an object, whatever was sent. */
+async function fields(c: Context): Promise<Record<string, unknown>> {
+  const body = await c.req.json().catch(() => null);
+  return body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+}
+const text = (v: unknown) => (typeof v === 'string' ? v : '');
+
+const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
+
+/**
+ * Where a request comes from, for counting wrong codes. Behind a proxy on this machine (Tailscale
+ * Serve, a tunnel) every request arrives from the machine itself, so the address the proxy passes
+ * on is used; from anywhere else that header is whatever the sender likes and is ignored.
+ */
+function callerAddress(c: Context): string {
+  const peer = getConnInfo(c).remote.address ?? 'unknown';
+  const forwarded = c.req.header('x-forwarded-for')?.split(',')[0].trim();
+  return LOOPBACK.test(peer) && forwarded ? forwarded.slice(0, 64) : peer;
+}
+
 pairApi.post('/codes', async (c) => {
-  const p = await c.req.json<{ name?: string; takes?: string }>().catch(() => ({} as { name?: string; takes?: string }));
-  const made = createPairCode(c.get('user').id, p.name ?? '', p.takes ?? 'both');
+  const p = await fields(c);
+  const made = createPairCode(c.get('user').id, text(p.name), text(p.takes) || 'both');
   // The code rides in the link's fragment, which browsers keep to themselves.
   return c.json({ ...made, link: `${env.appUrl}/pair#${made.code}`, hubUrl: env.serverUrl });
 });
@@ -98,22 +132,12 @@ pairApi.get('/codes/:id', (c) => {
 /** A wrong, used or expired code is the caller's to fix; anything else is ours. */
 const pairFailure = (e: unknown) => (e instanceof PairError ? { error: e.message, status: 400 as const } : { error: 'Could not add this device.', status: 500 as const });
 
-/** What kind of device a browser is, for the line that says who used a code. */
-function deviceName(userAgent: string): string {
-  if (/iPhone/.test(userAgent)) return 'an iPhone';
-  if (/iPad/.test(userAgent)) return 'an iPad';
-  if (/Android/.test(userAgent)) return /Mobile/.test(userAgent) ? 'an Android phone' : 'an Android tablet';
-  if (/Macintosh/.test(userAgent)) return 'a Mac';
-  if (/Windows/.test(userAgent)) return 'a Windows PC';
-  return 'another browser';
-}
-
 // A worker with no settings yet: it becomes one of the code owner's machines and gets its token.
 pairApi.post('/machine', async (c) => {
-  const p = await c.req.json<{ code?: string; name?: string }>().catch(() => ({} as { code?: string; name?: string }));
+  const p = await fields(c);
   try {
-    const made = redeemPairCode(p.code ?? '', 'machine', (code) => {
-      const { machine, token } = createMachine(code.userId, code.name || p.name?.trim() || 'Machine', code.takes);
+    const made = redeemPairCode(text(p.code), 'machine', callerAddress(c), (code) => {
+      const { machine, token } = createMachine(code.userId, code.name || text(p.name).trim() || 'Machine', code.takes);
       return { name: machine.name, token };
     });
     return c.json(made);
@@ -125,9 +149,9 @@ pairApi.post('/machine', async (c) => {
 
 // A phone or another browser: it is signed in as the code's owner.
 pairApi.post('/sign-in', async (c) => {
-  const p = await c.req.json<{ code?: string }>().catch(() => ({} as { code?: string }));
+  const p = await fields(c);
   try {
-    const made = redeemPairCode(p.code ?? '', 'browser', (code) => ({ name: deviceName(c.req.header('user-agent') ?? ''), userId: code.userId }));
+    const made = redeemPairCode(text(p.code), 'browser', callerAddress(c), (code) => ({ name: describeDevice(c.req.header('user-agent') ?? '').phrase, userId: code.userId }));
     createSession(c, made.userId);
     return c.json({ ok: true });
   } catch (e) {

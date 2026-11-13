@@ -13,7 +13,7 @@ import { CreateGroupModal } from './components/modals/CreateGroupModal';
 import { SearchModal } from './components/modals/SearchModal';
 import { ConfigLayer } from './components/config/ConfigLayer';
 import { TasksView } from './components/config/TasksView';
-import { useConfigUI } from './configStore';
+import { APP_SECTIONS, useConfigUI, type AppSection } from './configStore';
 
 function Shell() {
   const detailsOpen = useStore((s) => s.detailsOpen);
@@ -36,6 +36,9 @@ function Shell() {
       if (s.selectedBotId) s.loadRows(s.selectedBotId).catch(() => {});
     };
     window.addEventListener('message', onMsg);
+    // "/?settings=models" opens straight into that part of Settings: the Android app links here for the settings it has no screen for.
+    const section = new URLSearchParams(location.search).get('settings');
+    if (section && (APP_SECTIONS as readonly string[]).includes(section)) useConfigUI.getState().openAppSettings(section as AppSection);
     return () => { stop(); window.removeEventListener('message', onMsg); };
   }, []);
 

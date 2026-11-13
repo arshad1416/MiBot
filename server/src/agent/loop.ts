@@ -3,7 +3,7 @@ import { newId } from '../lib/ids.js';
 import { hub } from '../lib/hub.js';
 import { sseEvents, type StreamEvent } from '../lib/sse.js';
 import { appendRow, emitBot, getBotRow, getLive, getRow, setLive, updateRow } from '../store.js';
-import type { ActivityKind, MessageBody, ToolCallBody } from '../types.js';
+import type { ActivityKind, Approval, MessageBody, ToolCallBody } from '../types.js';
 import { appInfo as toolkitInfo } from '../apps.js';
 import { screenForWork } from '../computer.js';
 import { assignEngine, engineFor, engineKind, mcpToken, soulFor } from '../engine.js';
@@ -193,11 +193,16 @@ function patchToolRow(botId: string, seq: number, patch: Partial<ToolCallBody>) 
 }
 
 // ---------- approvals ----------
+//
+// An approval is answered at most once, from whichever device gets there first: the answer is written
+// only while the row still says pending, and only that write lets the call go ahead. Every change is
+// sent to all of the person's devices as an `approval` event, and GET /api/approvals gives the
+// pending ones to a device that was away.
 
 export type ApprovalDecision = 'allow' | 'deny' | 'expired';
 
 /** Longest a tool call waits for the user. Kept under the engines' 30 minute tool timeout. */
-const APPROVAL_WAIT_MS = 25 * 60_000;
+const APPROVAL_WAIT_MS = Number(process.env.APPROVAL_WAIT_MS) || 25 * 60_000;
 
 const waiters = new Map<string, { botId: string; resolve: (d: ApprovalDecision) => void }>();
 
@@ -209,6 +214,33 @@ function setApprovalCard(botId: string, rowSeq: number, approvalId: string, stat
 }
 
 const pendingApprovals = (botId: string) => db.prepare("SELECT * FROM approvals WHERE bot_id=? AND status='pending'").all(botId) as any[];
+
+const APPROVAL_SELECT = 'SELECT a.*, b.user_id, b.name bot_name FROM approvals a JOIN bots b ON b.id=a.bot_id';
+
+function approvalOf(ap: any): Approval {
+  const card = getRow(ap.bot_id, ap.row_seq)?.body as any;
+  const shown = card?.type === 'card' && card.card === 'approval' ? card : {};
+  return {
+    id: ap.id, botId: ap.bot_id, botName: ap.bot_name, title: shown.title ?? `Allow ${ap.bot_name} to ${humanizeSlug(ap.tool)}?`,
+    detail: shown.detail ?? '', tool: ap.tool, toolkitName: shown.toolkitName, args: shown.args ?? null, rowSeq: ap.row_seq,
+    status: ap.status, createdAt: ap.created_at, expiresAt: ap.expires_at ?? ap.created_at + APPROVAL_WAIT_MS,
+    resolvedAt: ap.resolved_at ?? null, resolvedBy: ap.resolved_by ?? null,
+  };
+}
+
+function announceApproval(approvalId: string) {
+  const ap = db.prepare(`${APPROVAL_SELECT} WHERE a.id=?`).get(approvalId) as any;
+  if (!ap) return;
+  hub.emit(ap.user_id, { type: 'approval', approval: approvalOf(ap) });
+  // Once answered or expired, the bot's last line ("Waiting for you: …") changes with it.
+  if (ap.status !== 'pending') emitBot(ap.bot_id);
+}
+
+/** The person's approvals still waiting, oldest first, and, with `sinceMs`, those answered or expired since then. */
+export function listApprovals(userId: string, sinceMs?: number): Approval[] {
+  const rows = db.prepare(`${APPROVAL_SELECT} WHERE b.user_id=? AND (a.status='pending' OR a.resolved_at>=?) ORDER BY a.created_at`).all(userId, sinceMs ?? Number.MAX_SAFE_INTEGER) as any[];
+  return rows.map(approvalOf);
+}
 
 /** Put an approval card in the conversation and wait for the user's answer. */
 export async function requestApproval(
@@ -224,7 +256,9 @@ export async function requestApproval(
     type: 'card', card: 'approval', approvalId, title: `Allow ${getBotRow(botId).name} to ${pol.title.split(': ')[1] ?? pol.title}?`,
     detail: describeArgs(args), tool: pol.key, toolkit: pol.toolkit, toolkitName: tk?.name, logo: tk?.logo, args, status: 'pending',
   });
-  db.prepare('INSERT INTO approvals(id,bot_id,row_seq,call_id,tool,status,created_at) VALUES (?,?,?,?,?,?,?)').run(approvalId, botId, card.seq, '', pol.key, 'pending', now());
+  db.prepare('INSERT INTO approvals(id,bot_id,row_seq,call_id,tool,status,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?)').run(approvalId, botId, card.seq, '', pol.key, 'pending', now(), now() + APPROVAL_WAIT_MS);
+  // Before the bot's live state says it waits, so a device that hears both knows it is for this request.
+  announceApproval(approvalId);
   db.prepare('UPDATE bots SET unread = unread + 1 WHERE id=?').run(botId);
   if (rowSeq !== null) patchToolRow(botId, rowSeq, { status: 'awaiting-approval' });
   setLive(botId, { isRunning: false, activity: { kind: 'waiting_for_you', since: now() }, awaiting: { reason: humanizeSlug(pol.key), since: now() } });
@@ -253,9 +287,9 @@ export async function requestApproval(
 
 function expireApproval(approvalId: string) {
   const ap = db.prepare('SELECT * FROM approvals WHERE id=?').get(approvalId) as any;
-  if (ap?.status === 'pending') {
-    db.prepare("UPDATE approvals SET status='expired', resolved_at=? WHERE id=?").run(now(), approvalId);
+  if (ap?.status === 'pending' && db.prepare("UPDATE approvals SET status='expired', resolved_at=? WHERE id=? AND status='pending'").run(now(), approvalId).changes === 1) {
     setApprovalCard(ap.bot_id, ap.row_seq, approvalId, 'expired');
+    announceApproval(approvalId);
   }
   waiters.get(approvalId)?.resolve('expired');
 }
@@ -269,18 +303,30 @@ export function expireStaleApprovals() {
   for (const ap of db.prepare("SELECT id FROM approvals WHERE status='pending'").all() as any[]) expireApproval(ap.id);
 }
 
-/** Resolve an approval card from the UI. */
-export function resolveApproval(userId: string, approvalId: string, decision: 'allow' | 'always' | 'deny') {
-  const ap = db.prepare('SELECT a.*, b.user_id FROM approvals a JOIN bots b ON b.id=a.bot_id WHERE a.id=?').get(approvalId) as any;
-  if (!ap || ap.user_id !== userId) throw new Error('not found');
-  if (ap.status !== 'pending') return;
+export class ApprovalGone extends Error {
+  constructor(readonly approval: Approval) { super(approval.status === 'expired' ? 'This request expired before it was answered.' : `This request was already ${approval.status === 'denied' ? 'denied' : 'approved'}${approval.resolvedBy ? ` on ${approval.resolvedBy}` : ''}.`); }
+}
+
+/**
+ * Answer an approval from a device. 'once' (or 'allow') lets this one call go ahead; 'always' also
+ * stops asking for this tool. Throws ApprovalGone when it was answered or ran out already, so the
+ * device can show what happened instead; the call has then gone ahead (or not) exactly once.
+ */
+export function resolveApproval(userId: string, approvalId: string, decision: 'once' | 'allow' | 'always' | 'deny', by = ''): Approval {
+  const find = () => db.prepare(`${APPROVAL_SELECT} WHERE a.id=? AND b.user_id=?`).get(approvalId, userId) as any;
+  const ap = find();
+  if (!ap) throw new Error('not found');
   const waiter = waiters.get(approvalId);
-  if (!waiter) return expireApproval(approvalId);
+  // Nothing is waiting any more (the hub restarted, or its time is up): it can only expire.
+  if (ap.status === 'pending' && (!waiter || (ap.expires_at && ap.expires_at <= now()))) expireApproval(approvalId);
   const status = decision === 'deny' ? 'denied' : decision === 'always' ? 'always' : 'allowed';
-  db.prepare('UPDATE approvals SET status=?, resolved_at=? WHERE id=?').run(status, now(), approvalId);
+  const won = db.prepare("UPDATE approvals SET status=?, resolved_at=?, resolved_by=? WHERE id=? AND status='pending'").run(status, now(), by.slice(0, 120) || null, approvalId).changes === 1;
+  if (!won) throw new ApprovalGone(approvalOf(find()));
   if (decision === 'always') db.prepare("INSERT OR REPLACE INTO policies(user_id,tool,mode) VALUES (?,?,'always_allow')").run(userId, ap.tool);
   setApprovalCard(ap.bot_id, ap.row_seq, approvalId, status);
-  waiter.resolve(decision === 'deny' ? 'deny' : 'allow');
+  announceApproval(approvalId);
+  waiter!.resolve(decision === 'deny' ? 'deny' : 'allow');
+  return approvalOf(find());
 }
 
 function describeArgs(args: any): string {
