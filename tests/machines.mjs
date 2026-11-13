@@ -266,6 +266,17 @@ try {
   const alone = await run('after hours');
   check('a job goes ahead when Jev cannot be reached', alone.choice.by === 'bot' && said(await rows(bot.id), 'Jev could not be asked'));
 
+  // A reply to one earlier message: quoted in the chat, and named to the agent.
+  const all = (await api('GET', `/bots/${bot.id}/rows`)).rows;
+  const answered = all.filter((r) => r.body.type === 'message' && r.body.role === 'assistant').at(-2);
+  const sentReply = (await api('POST', `/bots/${bot.id}/messages`, { text: 'more on this one steps=1', replyTo: answered.seq })).row;
+  check('a reply keeps a quote of the message it answers', sentReply.body.replyTo?.seq === answered.seq && sentReply.body.replyTo.role === 'assistant' && sentReply.body.text === 'more on this one steps=1');
+  await until('the reply to be worked on', async () => [laptopHome, path.join(dir, 'hub-engines', bot.id)].some((h) => { try { return read(h, 'requests.log').includes('more on this one'); } catch { return false; } }));
+  const told = [laptopHome, path.join(dir, 'hub-engines', bot.id)].map((h) => { try { return read(h, 'requests.log'); } catch { return ''; } }).join('');
+  check('the agent is told which message is being answered', told.includes(`[Replying to your earlier message: \\"${answered.body.text.slice(0, 20)}`));
+  const loose = (await api('POST', `/bots/${bot.id}/messages`, { text: 'no such message', replyTo: 999999 })).row;
+  check('a reply to a message that is not there is sent as a plain message', loose && !loose.body.replyTo);
+
   // Guessing shuts the guesser out for a while, and nobody else: the code still works from another address.
   const openCode = await api('POST', '/pair/codes', {});
   const guess = (code, headers = {}) => fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ code }) });

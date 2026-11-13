@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Bot } from '@shared/types';
+import type { Bot, MessageBody } from '@shared/types';
 import { api } from '../lib/api';
 import { displayName, useStore } from '../store';
 import { Icon } from './Icon';
@@ -8,6 +8,12 @@ import { endCall, isCallActive, startCall, useVoice } from '../voice/call';
 import { useDictation } from '../voice/dictation';
 
 const MAX_H = 200;
+
+/** Whose message a reply answers, as the composer names it. */
+function replyName(m: MessageBody, botName: string) {
+  if (m.from && m.from.kind !== 'voice') return m.from.name;
+  return m.role === 'assistant' ? botName : 'yourself';
+}
 const drafts = new Map<string, string>();
 
 export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
@@ -17,6 +23,10 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
   const [menu, setMenu] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const setModal = useStore((s) => s.setModal);
+  const replying = useStore((s) => s.replyingTo[bot.id]);
+  const clearReply = () => useStore.setState((s) => ({ replyingTo: { ...s.replyingTo, [bot.id]: undefined } }));
+  // Choosing Reply on a message puts the cursor here.
+  useEffect(() => { if (replying) ref.current?.focus(); }, [replying]);
 
   // Per-bot drafts.
   useEffect(() => { setText(drafts.get(bot.id) ?? ''); setError(null); ref.current?.focus(); }, [bot.id]);
@@ -43,8 +53,9 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
     if (!t || sending) return;
     setSending(true); setError(null);
     try {
-      await api.send(bot.id, t);
+      await api.send(bot.id, t, replying?.seq);
       setText('');
+      clearReply();
       drafts.delete(bot.id);
     } catch (e) {
       setError((e as Error).message || 'Message failed to send');
@@ -80,6 +91,18 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
   return (
     <div className="composer-area">
       {error && <div className="composer__error">{error} <button type="button" className="link-btn" onClick={() => setError(null)}>Dismiss</button></div>}
+      {replying && (
+        <div className="composer__reply">
+          <Icon name="reply" size={14} opacity={0.56} />
+          <span className="composer__reply-text">
+            <span className="composer__reply-who">Replying to {replyName(replying.body as MessageBody, displayName(bot))}</span>
+            {(replying.body as MessageBody).text}
+          </span>
+          <button type="button" className="composer__btn" onClick={clearReply} aria-label="Cancel reply" title="Cancel reply (Esc)">
+            <Icon name="close" size={14} opacity={0.56} />
+          </button>
+        </div>
+      )}
       <div className={`composer${multiline ? ' is-multiline' : ''}`}>
         <div className="composer__left">
           <span className="composer__plus-anchor">
@@ -106,6 +129,7 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
+              else if (e.key === 'Escape' && replying) { e.preventDefault(); clearReply(); }
             }}
             aria-label={`Message ${bot.name}`}
           />

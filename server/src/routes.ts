@@ -6,6 +6,7 @@ import { env } from './env.js';
 import { newId } from './lib/ids.js';
 import { hub } from './lib/hub.js';
 import { createSession, destroySession, isOwnerKey, requireUser, sessionToken, userFromCookieHeader, userFromToken, type AuthVars } from './lib/auth.js';
+import { quoteOf, withQuote } from './lib/replies.js';
 import { allLive, appendRow, clearConversation, emitBot, getBot, getBotRow, getRow, listBots, listRoutines, listRows, listTasks, toRoutine, updateRow } from './store.js';
 import { ApprovalGone, enqueue, interrupt, listApprovals, resolveApproval } from './agent/loop.js';
 import { describeDevice } from './lib/devices.js';
@@ -270,13 +271,18 @@ api.get('/bots/:id/rows', (c) => {
 api.post('/bots/:id/messages', async (c) => {
   const b = ownBot(c.get('user').id, c.req.param('id'));
   if (!b) return c.json({ error: 'not found' }, 404);
-  const { text } = await c.req.json<{ text: string }>();
-  if (!text?.trim()) return c.json({ error: 'empty' }, 400);
-  const row = appendRow(b.id, 'message', { type: 'message', role: 'user', text: text.trim() });
+  const p = await c.req.json().catch(() => null);
+  const text = typeof p?.text === 'string' ? p.text.trim() : '';
+  if (!text) return c.json({ error: 'empty' }, 400);
+  // A reply to an earlier message in this conversation: quoted in the chat, and named to the agent.
+  const quoted = Number.isInteger(p?.replyTo) ? getRow(b.id, p.replyTo) : null;
+  const replyTo = quoted?.body.type === 'message' && quoted.body.text ? quoteOf(quoted.seq, quoted.body) : undefined;
+  const row = appendRow(b.id, 'message', { type: 'message', role: 'user', text, ...(replyTo ? { replyTo } : {}) });
+  const said = replyTo && quoted?.body.type === 'message' ? withQuote(text, replyTo, quoted.body.text) : text;
   // Group chats dispatch to their member Bots instead of running their own loop.
-  if (b.kind === 'room') dispatchRoomMessage(b.id, text.trim(), enqueue);
+  if (b.kind === 'room') dispatchRoomMessage(b.id, said, enqueue);
   // Any pending question card is answered by a free-text message.
-  else enqueue(b.id, { type: 'user', text: text.trim() });
+  else enqueue(b.id, { type: 'user', text: said });
   return c.json({ row });
 });
 

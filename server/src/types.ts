@@ -70,6 +70,17 @@ export interface MessageBody {
   /** Set when a message came from another bot, a routine or a voice call rather than the user typing. */
   from?: { kind: 'bot' | 'routine' | 'voice'; id: string; name: string };
   citations?: { url: string; title?: string }[];
+  /** The earlier message this one answers, quoted as it was when the reply was sent. */
+  replyTo?: MessageQuote;
+}
+
+/** A short quote of an earlier message, for a reply. */
+export interface MessageQuote {
+  seq: number;
+  role: 'user' | 'assistant';
+  /** Who said it, when it was not the person or this Bot (another Bot, a routine). */
+  name?: string;
+  text: string;
 }
 
 export interface ToolCallBody {
