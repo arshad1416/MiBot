@@ -63,6 +63,10 @@ fun buildItems(rows: List<Row>): List<ChatItem> {
     return items
 }
 
+/** Where the message with this seq is drawn in `items`, for jumping to the message a reply quotes; -1 when it is not loaded. */
+fun indexOfMessage(items: List<ChatItem>, seq: Int) =
+    items.indexOfFirst { it is ChatItem.Group && it.rows.any { r -> r.seq == seq } }
+
 /** Steps taken since the person last wrote: what the hub's count for the running turn is compared with. */
 fun stepsThisTurn(rows: List<Row>): Int {
     var n = 0

@@ -106,8 +106,17 @@ data class MessageBody(
     /** Set when the message came from another bot, a routine or a voice call rather than the person typing. */
     val from: Sender? = null,
     val citations: List<Citation> = emptyList(),
+    /** The earlier message this one answers, when the person chose Reply on it. */
+    val replyTo: Quote? = null,
 ) : RowBody {
     val isUser get() = role == "user"
+}
+
+/** A short copy of an earlier message, kept with a reply. `seq` points at the original row. */
+@Serializable
+data class Quote(val seq: Int, val role: String = "assistant", val name: String? = null, val text: String = "") {
+    /** Who wrote the quoted message, as the chat names them. */
+    fun whose(botName: String) = name ?: if (role == "user") "You" else botName
 }
 
 @Serializable

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -69,9 +72,11 @@ import app.mibot.core.VoiceState
 import app.mibot.core.activityPhrase
 import app.mibot.core.activityStatus
 import app.mibot.core.buildItems
+import app.mibot.core.indexOfMessage
 import app.mibot.core.isOnHold
 import app.mibot.core.isWaitingForYou
 import app.mibot.core.stepsThisTurn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -139,6 +144,28 @@ fun ChatScreen(botId: String) {
     }
     val scrolledUp by remember { derivedStateOf { list.firstVisibleItemIndex > 2 } }
 
+    // Reply: the message the next one answers, and the one briefly lit after jumping to it from a quote.
+    var replyingTo by remember(botId) { mutableStateOf<ChatRow?>(null) }
+    var litSeq by remember { mutableStateOf<Int?>(null) }
+    val latestItems by rememberUpdatedState(items)
+    fun jumpTo(seq: Int) {
+        scope.launch {
+            // An old message may not be loaded yet: fetch earlier pages a few times before giving up.
+            var at = indexOfMessage(latestItems, seq)
+            repeat(5) {
+                if (at >= 0 || transcript?.hasEarlier != true) return@repeat
+                runCatching { hub.loadEarlier(botId) }
+                delay(150)
+                at = indexOfMessage(latestItems, seq)
+            }
+            if (at < 0) { error = "That message is no longer in this conversation."; return@launch }
+            list.animateScrollToItem(at)
+            litSeq = seq
+            delay(1200)
+            if (litSeq == seq) litSeq = null
+        }
+    }
+
     val voice = app.voice.state
     val inCall = voice.botId == botId && voice.status != VoiceState.Status.Idle
     var confirmFresh by remember { mutableStateOf(false) }
@@ -187,7 +214,7 @@ fun ChatScreen(botId: String) {
                             TimeText.divider(item.at), style = Type.caption, color = Mi.colors.textTertiary, textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         )
-                        is ChatItem.Group -> MessageGroup(item, bot, state.bots, colors)
+                        is ChatItem.Group -> MessageGroup(item, bot, state.bots, colors, litSeq, onReply = { replyingTo = it }, onQuote = ::jumpTo)
                         is ChatItem.Steps -> StepsLine(item)
                         is ChatItem.Single -> SingleRow(item.row, bot, run)
                     }
@@ -207,7 +234,13 @@ fun ChatScreen(botId: String) {
         if (inCall) VoiceBar(bot, voice, colors)
         else Composer(
             bot, colors,
-            onSend = { text -> run { hub.client.sendMessage(botId, text) } },
+            replying = replyingTo,
+            onCancelReply = { replyingTo = null },
+            onSend = { text ->
+                val answers = replyingTo?.seq
+                replyingTo = null
+                run { hub.client.sendMessage(botId, text, answers) }
+            },
             onCall = { app.voice.start(botId) },
             onError = { error = it },
         )
@@ -320,9 +353,15 @@ private fun StepsLine(item: ChatItem.Steps) {
     }
 }
 
-/** Messages in a row from one sender. The person's own sit on the right in the bot's colour. */
+/**
+ * Messages in a row from one sender. The person's own sit on the right in the bot's colour. Holding a
+ * message offers Reply and Copy; a reply shows the message it answers at its top, and tapping that jumps to it.
+ */
 @Composable
-private fun MessageGroup(group: ChatItem.Group, bot: Bot, bots: List<Bot>, colors: BotColors) {
+private fun MessageGroup(
+    group: ChatItem.Group, bot: Bot, bots: List<Bot>, colors: BotColors, litSeq: Int?,
+    onReply: (ChatRow) -> Unit, onQuote: (Int) -> Unit,
+) {
     val copy = rememberCopy()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val widest = maxWidth * if (group.mine) 0.82f else 0.92f
@@ -345,11 +384,27 @@ private fun MessageGroup(group: ChatItem.Group, bot: Bot, bots: List<Bot>, color
             for (row in group.rows) {
                 val body = row.body as MessageBody
                 val shape = RoundedCornerShape(22.dp)
+                var menu by remember { mutableStateOf(false) }
+                val ink = if (group.mine) colors.onBubble else Mi.colors.text
                 Column(
                     Modifier.widthIn(max = widest).clip(shape).background(if (group.mine) colors.bubble else Mi.colors.surface)
-                        .combinedClickable(onClick = {}, onLongClick = { copy(body.text) })
+                        .then(if (row.seq == litSeq) Modifier.border(2.dp, Mi.colors.textTertiary, shape) else Modifier)
+                        .combinedClickable(onClick = {}, onLongClick = { menu = true })
                         .padding(horizontal = 16.dp, vertical = 11.dp),
                 ) {
+                    body.replyTo?.let { q ->
+                        Row(
+                            Modifier.padding(bottom = 8.dp).height(IntrinsicSize.Min).clip(RoundedCornerShape(10.dp)).background(ink.copy(alpha = 0.08f))
+                                .clickable(onClickLabel = "Show the message this answers") { onQuote(q.seq) }
+                                .padding(end = 10.dp),
+                        ) {
+                            Box(Modifier.width(3.dp).fillMaxHeight().background(ink.copy(alpha = 0.35f)))
+                            Column(Modifier.padding(start = 8.dp, top = 5.dp, bottom = 5.dp)) {
+                                Text(q.whose(bot.name), style = Type.caption, fontWeight = FontWeight.SemiBold, color = ink.copy(alpha = 0.8f), maxLines = 1)
+                                Text(q.text, style = Type.small, color = ink.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
                     if (group.mine) Text(body.text, style = Type.body, color = colors.onBubble)
                     else if (body.text.isEmpty() && body.streaming) PulseDot(Mi.colors.textSecondary, 9.dp, Modifier.padding(vertical = 6.dp))
                     else Markdown(body.text, color = Mi.colors.text)
@@ -360,6 +415,13 @@ private fun MessageGroup(group: ChatItem.Group, bot: Bot, bots: List<Bot>, color
                             color = Mi.colors.textSecondary, style = Type.caption,
                         )
                     }
+                    MiMenu(
+                        menu, { menu = false },
+                        listOfNotNull(
+                            MenuItem("Reply", MiIcons.reply) { onReply(row) }.takeUnless { body.streaming },
+                            MenuItem("Copy", MiIcons.copy) { copy(body.text) },
+                        ),
+                    )
                 }
             }
         }

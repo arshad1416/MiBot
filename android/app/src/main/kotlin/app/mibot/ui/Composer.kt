@@ -32,17 +32,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mibot.core.Bot
 import app.mibot.core.HubException
+import app.mibot.core.MessageBody
+import app.mibot.core.Row as ChatRow
 import app.mibot.core.VoiceState
 import app.mibot.voice.Dictation
 import app.mibot.voice.hasMicrophone
@@ -54,10 +59,13 @@ private enum class Dictating { Off, Recording, Working }
 
 /**
  * The box at the bottom of a chat: type a message, dictate one with the microphone, or (when the
- * box is empty) start a voice call with the bot.
+ * box is empty) start a voice call with the bot. `replying`: the message the next one answers, shown above the box.
  */
 @Composable
-fun Composer(bot: Bot, colors: BotColors, onSend: (String) -> Unit, onCall: () -> Unit, onError: (String?) -> Unit) {
+fun Composer(
+    bot: Bot, colors: BotColors, replying: ChatRow?, onCancelReply: () -> Unit,
+    onSend: (String) -> Unit, onCall: () -> Unit, onError: (String?) -> Unit,
+) {
     val context = LocalContext.current
     val hub = LocalHub.current
     val scope = rememberCoroutineScope()
@@ -101,41 +109,62 @@ fun Composer(bot: Bot, colors: BotColors, onSend: (String) -> Unit, onCall: () -
         if (hasMicrophone(context)) action() else { wanted = action; askMicrophone.launch(Manifest.permission.RECORD_AUDIO) }
     }
 
+    // Choosing Reply on a message puts the cursor in the box.
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(replying?.seq) { if (replying != null && dictating == Dictating.Off) runCatching { focus.requestFocus() } }
+
     val shape = RoundedCornerShape(28.dp)
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
-        Row(
-            Modifier.weight(1f).clip(shape).background(Mi.colors.surface).border(1.dp, Mi.colors.border, shape).heightIn(min = 52.dp).padding(start = 18.dp, end = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (dictating == Dictating.Off) {
-                BasicTextField(
-                    value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f).padding(vertical = 14.dp), maxLines = 6,
-                    textStyle = Type.body.copy(color = Mi.colors.text), cursorBrush = SolidColor(Mi.colors.text),
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    decorationBox = { inner ->
-                        Box {
-                            if (text.isEmpty()) Text("Ask ${bot.name}", style = Type.body, color = Mi.colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            inner()
-                        }
-                    },
-                )
-                CircleButton(MiIcons.mic, "Dictate", { withMicrophone(::startDictation) }, size = 40.dp, fill = Color.Transparent, tint = Mi.colors.textSecondary)
-            } else {
-                Text(if (dictating == Dictating.Recording) "Listening…" else "Writing it down…", style = Type.body, color = Mi.colors.textSecondary)
-                Spacer(Modifier.width(12.dp))
-                LevelBars({ dictation.level }, Mi.colors.text, Modifier.weight(1f).height(24.dp))
-                if (dictating == Dictating.Recording) {
-                    CircleButton(MiIcons.close, "Cancel dictation", { dictation.cancel(); dictating = Dictating.Off }, size = 40.dp, fill = Color.Transparent, tint = Mi.colors.textSecondary)
-                    CircleButton(MiIcons.check, "Use what I said", ::finishDictation, size = 40.dp, fill = Color.Transparent)
+    Column(Modifier.fillMaxWidth()) {
+        (replying?.body as? MessageBody)?.let { quoted ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp).clip(RoundedCornerShape(16.dp)).background(Mi.colors.surface)
+                    .padding(start = 14.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MiIcon(MiIcons.reply, 16.dp, Mi.colors.textSecondary)
+                Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                    val who = quoted.from?.takeIf { it.kind != "voice" }?.name ?: if (quoted.isUser) "yourself" else bot.name
+                    Text("Replying to $who", style = Type.caption, fontWeight = FontWeight.SemiBold, color = Mi.colors.text, maxLines = 1)
+                    Text(quoted.text, style = Type.small, color = Mi.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                CircleButton(MiIcons.close, "Cancel reply", onCancelReply, size = 36.dp, fill = Color.Transparent, tint = Mi.colors.textSecondary)
             }
         }
-        Spacer(Modifier.width(8.dp))
-        val hasText = text.isNotBlank()
-        if (hasText) {
-            CircleButton(MiIcons.arrowUp, "Send", { onSend(text.trim()); text = "" }, size = 52.dp, fill = colors.action, tint = colors.onAction)
-        } else {
-            CircleButton(MiIcons.voiceA, "Talk to ${bot.name}", { withMicrophone(onCall) }, size = 52.dp, fill = colors.action, tint = colors.onAction, enabled = dictating == Dictating.Off)
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
+            Row(
+                Modifier.weight(1f).clip(shape).background(Mi.colors.surface).border(1.dp, Mi.colors.border, shape).heightIn(min = 52.dp).padding(start = 18.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (dictating == Dictating.Off) {
+                    BasicTextField(
+                        value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f).focusRequester(focus).padding(vertical = 14.dp), maxLines = 6,
+                        textStyle = Type.body.copy(color = Mi.colors.text), cursorBrush = SolidColor(Mi.colors.text),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        decorationBox = { inner ->
+                            Box {
+                                if (text.isEmpty()) Text("Ask ${bot.name}", style = Type.body, color = Mi.colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                inner()
+                            }
+                        },
+                    )
+                    CircleButton(MiIcons.mic, "Dictate", { withMicrophone(::startDictation) }, size = 40.dp, fill = Color.Transparent, tint = Mi.colors.textSecondary)
+                } else {
+                    Text(if (dictating == Dictating.Recording) "Listening…" else "Writing it down…", style = Type.body, color = Mi.colors.textSecondary)
+                    Spacer(Modifier.width(12.dp))
+                    LevelBars({ dictation.level }, Mi.colors.text, Modifier.weight(1f).height(24.dp))
+                    if (dictating == Dictating.Recording) {
+                        CircleButton(MiIcons.close, "Cancel dictation", { dictation.cancel(); dictating = Dictating.Off }, size = 40.dp, fill = Color.Transparent, tint = Mi.colors.textSecondary)
+                        CircleButton(MiIcons.check, "Use what I said", ::finishDictation, size = 40.dp, fill = Color.Transparent)
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            val hasText = text.isNotBlank()
+            if (hasText) {
+                CircleButton(MiIcons.arrowUp, "Send", { onSend(text.trim()); text = "" }, size = 52.dp, fill = colors.action, tint = colors.onAction)
+            } else {
+                CircleButton(MiIcons.voiceA, "Talk to ${bot.name}", { withMicrophone(onCall) }, size = 52.dp, fill = colors.action, tint = colors.onAction, enabled = dictating == Dictating.Off)
+            }
         }
     }
 }

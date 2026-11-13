@@ -48,6 +48,24 @@ class ItemsTest {
         assertEquals("Morning", groups[0].from?.name)
     }
 
+    @Test fun `a reply keeps the message it answers, and the chat can find that message`() {
+        val row = HubJson.decodeFromString(
+            Row.serializer(),
+            """{"botId":"b1","seq":7,"body":{"type":"message","role":"user","text":"More on this","replyTo":{"seq":3,"role":"assistant","text":"Two ideas"}}}""",
+        )
+        val quote = (row.body as MessageBody).replyTo!!
+        assertEquals(3, quote.seq)
+        assertEquals("Doug", quote.whose("Doug"))
+        assertEquals("You", quote.copy(role = "user").whose("Doug"))
+        assertEquals("Ana", quote.copy(name = "Ana").whose("Doug"))
+        assertNull(HubJson.decodeFromString(Row.serializer(), """{"botId":"b1","seq":8,"body":{"type":"message","text":"hi"}}""").let { (it.body as MessageBody).replyTo })
+
+        val first = bot("Two ideas", t0)
+        val items = buildItems(listOf(user("Give me two", t0 - 1000), first, user("More on this", t0 + 1000)))
+        assertEquals(items.indexOfFirst { it is ChatItem.Group && !it.mine }, indexOfMessage(items, first.seq))
+        assertEquals(-1, indexOfMessage(items, 999))
+    }
+
     @Test fun `steps still running have no length yet, and steps are counted back to the person's last message`() {
         val rows = listOf(user("Go", t0), step("done", t0 + 1000), step("running", t0 + 2000))
         assertNull((buildItems(rows).last() as ChatItem.Steps).endAt)

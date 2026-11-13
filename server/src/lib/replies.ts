@@ -13,8 +13,10 @@ export function quoteOf(seq: number, m: MessageBody): MessageQuote {
   return { seq, role: m.role, ...(m.from && m.from.kind !== 'voice' ? { name: m.from.name } : {}), text: clip(m.text, QUOTE_CHARS) };
 }
 
-/** The person's words as the agent gets them, with the message they answer named first. */
-/** `full` is the whole earlier message; the stored quote is shortened for the chat. */
+/**
+ * The person's words as the agent gets them, with the message they answer named first. `full` is the
+ * whole earlier message; the stored quote is shortened for the chat.
+ */
 export function withQuote(text: string, q: MessageQuote, full = q.text): string {
   const whose = q.name ? `${q.name}'s message` : q.role === 'assistant' ? 'your earlier message' : 'my earlier message';
   return `[Replying to ${whose}: "${clip(full, AGENT_QUOTE_CHARS)}"]\n\n${text}`;

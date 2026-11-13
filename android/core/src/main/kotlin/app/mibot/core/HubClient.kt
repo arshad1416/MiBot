@@ -110,7 +110,9 @@ class HubClient(val account: HubAccount, base: OkHttpClient = defaultHttp, priva
 
     suspend fun rows(botId: String, beforeSeq: Int? = null) =
         call(RowsResponse.serializer(), "GET", "/bots/$botId/rows" + (beforeSeq?.let { "?beforeSeq=$it" } ?: ""))
-    suspend fun sendMessage(botId: String, text: String) = send("POST", "/bots/$botId/messages", json { put("text", text) })
+    /** `replyTo`: the seq of an earlier message this one answers. */
+    suspend fun sendMessage(botId: String, text: String, replyTo: Int? = null) =
+        send("POST", "/bots/$botId/messages", json { put("text", text); replyTo?.let { put("replyTo", it) } })
     suspend fun interrupt(botId: String) = send("POST", "/bots/$botId/interrupt")
     suspend fun newConversation(botId: String) = send("POST", "/bots/$botId/fresh")
 
