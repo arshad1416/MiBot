@@ -135,8 +135,13 @@ fun ChatScreen(botId: String) {
 
     val list = rememberLazyListState()
     // The list is drawn bottom-up, so item 0 is the newest. Stay on it when something new arrives, unless the person scrolled up to read.
+    // After the person sends, follow the chat down even if the keyboard closing left it scrolled up.
+    var followNext by remember { mutableStateOf(false) }
     val newest = items.firstOrNull()?.key
-    LaunchedEffect(newest) { if (list.firstVisibleItemIndex <= 1) list.scrollToItem(0) }
+    LaunchedEffect(newest) {
+        if (followNext || list.firstVisibleItemIndex <= 1) list.scrollToItem(0)
+        followNext = false
+    }
     LaunchedEffect(items.size, transcript?.hasEarlier) {
         if (transcript?.hasEarlier != true) return@LaunchedEffect
         snapshotFlow { (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= list.layoutInfo.totalItemsCount - 4 }.first { it }
@@ -239,6 +244,7 @@ fun ChatScreen(botId: String) {
             onSend = { text ->
                 val answers = replyingTo?.seq
                 replyingTo = null
+                followNext = true
                 run { hub.client.sendMessage(botId, text, answers) }
             },
             onCall = { app.voice.start(botId) },

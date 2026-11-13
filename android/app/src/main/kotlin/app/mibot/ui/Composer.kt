@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
@@ -111,7 +112,10 @@ fun Composer(
 
     // Choosing Reply on a message puts the cursor in the box.
     val focus = remember { FocusRequester() }
-    LaunchedEffect(replying?.seq) { if (replying != null && dictating == Dictating.Off) runCatching { focus.requestFocus() } }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(replying?.seq) {
+        if (replying != null && dictating == Dictating.Off) runCatching { focus.requestFocus(); keyboard?.show() }
+    }
 
     val shape = RoundedCornerShape(28.dp)
     Column(Modifier.fillMaxWidth()) {
