@@ -111,9 +111,14 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
      * Fetch what waits for the person, and what became of the requests this device last saw waiting:
      * after a reconnect, or when the app comes back, nothing it shows is stale.
      */
+    /** The hub's time at the last approvals list. */
+    @Volatile private var approvalsListedAt: Long? = null
+
     suspend fun loadApprovals() {
-        val since = _state.value.pendingApprovals.minOfOrNull { it.createdAt }
+        // What is waiting, and what was decided since the last list (or since the oldest request still held as waiting).
+        val since = listOfNotNull(_state.value.pendingApprovals.minOfOrNull { it.createdAt }, approvalsListedAt?.minus(60_000)).minOrNull()
         val r = client.approvals(since)
+        if (r.serverTime > 0) approvalsListedAt = r.serverTime
         val before = _state.value
         _state.update { it.withApprovals(r.approvals, r.serverTime, System.currentTimeMillis()) }
         // Tell the notifications what changed while the line was down, as if each change had been pushed.
