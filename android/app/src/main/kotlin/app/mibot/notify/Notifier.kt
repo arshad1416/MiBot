@@ -86,7 +86,8 @@ class Notifier(private val app: MiBotApp) {
             .setAutoCancel(true)
             .build()
         runCatching { manager.notify(bot.id.hashCode(), n) }
-        if (notice is Notice.Waiting) waiting += bot.id else waiting -= bot.id
+        // The hub's last line for a bot held up on a request also reads "Waiting for you: …".
+        if (notice is Notice.Waiting || text.startsWith("Waiting for you")) waiting += bot.id else waiting -= bot.id
     }
 
     /** Bots whose notification now says they are waiting for the person. */
