@@ -64,18 +64,23 @@ fun HubState.withApproval(a: Approval): HubState {
  * `asked`. One this device still had as waiting that is in neither is gone from the hub (it restarted):
  * it can no longer be answered.
  */
-fun HubState.withApprovals(fresh: List<Approval>, serverTime: Long, localNow: Long): HubState {
+fun HubState.withApprovals(
+    fresh: List<Approval>, serverTime: Long, localNow: Long,
+    // Only requests held before a list was asked for can be missing from that snapshot.
+    expirePendingIds: Set<String> = approvals.keys,
+): HubState {
     var next = this
     for (a in fresh) next = next.withApproval(a)
     val listed = fresh.mapTo(HashSet()) { it.id }
-    val lost = next.approvals.values.filter { it.pending && it.id !in listed }.associate { it.id to it.copy(status = "expired") }
+    val lost = next.approvals.values.filter { it.pending && it.id in expirePendingIds && it.id !in listed }.associate { it.id to it.copy(status = "expired") }
     return next.copy(approvals = next.approvals + lost, clockSkewMs = if (serverTime > 0) serverTime - localNow else clockSkewMs)
 }
 
 /** What one pushed event changes. Events that call for a fetch (`Roster`, `Routines`) change nothing here. */
 fun HubState.reduce(ev: ServerEvent): HubState = when (ev) {
     is ServerEvent.Rows -> withRows(ev.botId, ev.generation, ev.rows)
-    is ServerEvent.Cleared -> copy(transcripts = transcripts + (ev.botId to Transcript(ev.generation, loaded = true)))
+    is ServerEvent.Cleared -> if ((transcripts[ev.botId]?.generation ?: -1) >= ev.generation) this
+        else copy(transcripts = transcripts + (ev.botId to Transcript(ev.generation, loaded = true)))
     is ServerEvent.Live -> copy(live = live + (ev.state.botId to ev.state))
     is ServerEvent.BotChanged -> copy(bots = if (bots.any { it.id == ev.bot.id }) bots.map { if (it.id == ev.bot.id) ev.bot else it } else bots + ev.bot)
     is ServerEvent.Computer -> copy(computer = ev.state)

@@ -75,7 +75,8 @@ fun ApprovalsScreen(focusId: String?) {
 @Composable
 fun ApprovalItem(a: Approval, hub: HubSession, focused: Boolean = false, skewMs: Long = 0, @Suppress("UNUSED_PARAMETER") tick: Int = 0, showBot: Boolean = true) {
     val scope = rememberCoroutineScope()
-    val bot = hub.state.value.bot(a.botId)
+    val state by hub.state.collectAsStateWithLifecycle()
+    val bot = state.bot(a.botId)
     val colors = botColors(bot?.avatarColor ?: "black")
     var busy by remember(a.id) { mutableStateOf(false) }
     var note by rememberSaveable(a.id) { mutableStateOf<String?>(null) }

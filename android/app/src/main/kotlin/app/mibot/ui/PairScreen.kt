@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.mibot.BuildConfig
 import app.mibot.MiBotApp
 import app.mibot.core.HubAccount
 import app.mibot.core.HubClient
@@ -61,6 +62,10 @@ fun PairScreen(onPaired: (HubAccount) -> Unit) {
     LaunchedEffect(keyboard, scroll.maxValue) { if (keyboard) scroll.scrollTo(scroll.maxValue) }
 
     fun pair(hubUrl: String, pairCode: String) {
+        if (BuildConfig.QA_MODE) {
+            error = "Real hub pairing is disabled in MiBot QA."
+            return
+        }
         if (busy) return
         busy = true
         error = null
@@ -76,6 +81,7 @@ fun PairScreen(onPaired: (HubAccount) -> Unit) {
     }
 
     fun scan() {
+        if (BuildConfig.QA_MODE) return
         error = null
         val options = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
         GmsBarcodeScanning.getClient(context, options).startScan()

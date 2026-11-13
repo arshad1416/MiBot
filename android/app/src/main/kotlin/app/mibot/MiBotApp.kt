@@ -43,11 +43,16 @@ class MiBotApp : Application() {
         store = AccountStore(this)
         notifier = Notifier(this)
         voice = VoiceController(this)
-        store.account?.let(::open)
+        if (BuildConfig.DEBUG && BuildConfig.QA_MODE) {
+            // The opt-in QA APK uses only a fixture transport, never the saved production account.
+            store.notifications = false
+            val client = Class.forName("app.mibot.qa.QaHub").getMethod("client").invoke(null) as HubClient
+            open(client.account, client)
+        } else store.account?.let { open(it) }
     }
 
-    private fun open(account: HubAccount) {
-        val session = HubSession(HubClient(account, userAgent = USER_AGENT), scope)
+    private fun open(account: HubAccount, client: HubClient = HubClient(account, userAgent = USER_AGENT)) {
+        val session = HubSession(client, scope)
         hub = session
         session.start()
         sessionJobs = scope.launch {
@@ -61,11 +66,13 @@ class MiBotApp : Application() {
 
     /** This phone was just added to a hub. */
     fun signIn(account: HubAccount) {
+        if (BuildConfig.QA_MODE) return // Never replace the fixture with a real account.
         store.account = account
         open(account)
     }
 
     fun signOut() {
+        if (BuildConfig.QA_MODE) return // Keep QA in its isolated fixture session.
         val client = hub?.client
         close()
         if (client != null) scope.launch { runCatching { client.signOut() } }
