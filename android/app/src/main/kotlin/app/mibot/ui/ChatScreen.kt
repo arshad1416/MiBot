@@ -243,9 +243,10 @@ fun ChatScreen(botId: String) {
             onCancelReply = { replyingTo = null },
             onSend = { text ->
                 val answers = replyingTo?.seq
-                replyingTo = null
                 followNext = true
-                run { hub.client.sendMessage(botId, text, answers) }
+                hub.client.sendMessage(botId, text, answers)
+                // A failed send keeps the reply target, too. Do not clear a newer selection.
+                if (replyingTo?.seq == answers) replyingTo = null
             },
             onCall = { app.voice.start(botId) },
             onError = { error = it },

@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val PAGE = 200
 
@@ -26,6 +28,9 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
     val notices: SharedFlow<Notice> = _notices
 
     private var stream: Job? = null
+    // Reconnect and foreground refreshes can overlap; older snapshots must not land last.
+    private val botsRefresh = Mutex()
+    private val approvalsRefresh = Mutex()
     /** The chat on screen: it is kept read, and fetched again after a reconnect. */
     @Volatile var openBotId: String? = null
         private set
@@ -71,12 +76,14 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
     private val eventCount get() = events.get()
     /** Per bot: the count when an event last changed it. */
     private val touched = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val approvalsTouched = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private suspend fun handle(ev: ServerEvent) {
         _state.value.noticeFor(ev, openBotId)?.let { _notices.tryEmit(it) }
         when (ev) {
             is ServerEvent.BotChanged -> touched[ev.bot.id] = events.incrementAndGet()
             is ServerEvent.Live -> touched[ev.state.botId] = events.incrementAndGet()
+            is ServerEvent.ApprovalChanged -> approvalsTouched[ev.approval.id] = events.incrementAndGet()
             else -> {}
         }
         _state.update { it.reduce(ev) }
@@ -114,13 +121,21 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
     /** The hub's time at the last approvals list. */
     @Volatile private var approvalsListedAt: Long? = null
 
-    suspend fun loadApprovals() {
+    suspend fun loadApprovals() = approvalsRefresh.withLock {
         // What is waiting, and what was decided since the last list (or since the oldest request still held as waiting).
+        val asked = eventCount
+        val heldIds = _state.value.approvals.keys.toSet()
         val since = listOfNotNull(_state.value.pendingApprovals.minOfOrNull { it.createdAt }, approvalsListedAt?.minus(60_000)).minOrNull()
         val r = client.approvals(since)
         if (r.serverTime > 0) approvalsListedAt = r.serverTime
         val before = _state.value
-        _state.update { it.withApprovals(r.approvals, r.serverTime, System.currentTimeMillis()) }
+        _state.update { st ->
+            st.withApprovals(
+                r.approvals.filter { (approvalsTouched[it.id] ?: 0) <= asked },
+                r.serverTime, System.currentTimeMillis(),
+                expirePendingIds = heldIds.filterTo(HashSet()) { (approvalsTouched[it] ?: 0) <= asked },
+            )
+        }
         // Tell the notifications what changed while the line was down, as if each change had been pushed.
         for (a in _state.value.approvals.values) {
             val held = before.approvals[a.id]
@@ -145,14 +160,18 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
      * what the event said: the answer was true when the hub wrote it, the event is newer. With
      * `announce`, what changed while the line was down is told as the events would have told it.
      */
-    suspend fun loadBots(announce: Boolean = false) {
+    suspend fun loadBots(announce: Boolean = false) = botsRefresh.withLock {
         val asked = eventCount
         val r = client.bots()
         val before = _state.value
         val newer = { id: String -> (touched[id] ?: 0) > asked }
         _state.update { st ->
-            val bots = r.bots.map { b -> if (newer(b.id)) st.bot(b.id) ?: b else b }
-            val live = r.live.associateBy { it.botId }.mapValues { (id, l) -> if (newer(id)) st.live[id] ?: l else l }
+            val listed = r.bots.mapTo(HashSet()) { it.id }
+            val bots = r.bots.map { b -> if (newer(b.id)) st.bot(b.id) ?: b else b } +
+                st.bots.filter { it.id !in listed && newer(it.id) }
+            val botIds = bots.mapTo(HashSet()) { it.id }
+            val live = r.live.associateBy { it.botId }.mapValues { (id, l) -> if (newer(id)) st.live[id] ?: l else l } +
+                st.live.filter { (id, _) -> id in botIds && newer(id) }
             st.copy(bots = bots, live = live, ready = true)
         }
         if (announce && before.ready) {

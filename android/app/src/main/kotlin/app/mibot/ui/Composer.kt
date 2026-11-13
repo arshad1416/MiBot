@@ -65,12 +65,13 @@ private enum class Dictating { Off, Recording, Working }
 @Composable
 fun Composer(
     bot: Bot, colors: BotColors, replying: ChatRow?, onCancelReply: () -> Unit,
-    onSend: (String) -> Unit, onCall: () -> Unit, onError: (String?) -> Unit,
+    onSend: suspend (String) -> Unit, onCall: () -> Unit, onError: (String?) -> Unit,
 ) {
     val context = LocalContext.current
     val hub = LocalHub.current
     val scope = rememberCoroutineScope()
     var text by rememberSaveable(bot.id) { mutableStateOf("") }
+    val submission = remember(bot.id) { MessageSubmission() }
     var dictating by remember { mutableStateOf(Dictating.Off) }
     val dictation = remember { Dictation(context) }
     DisposableEffect(Unit) { onDispose { dictation.cancel() } }
@@ -141,7 +142,7 @@ fun Composer(
             ) {
                 if (dictating == Dictating.Off) {
                     BasicTextField(
-                        value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f).focusRequester(focus).padding(vertical = 14.dp), maxLines = 6,
+                        value = text, onValueChange = { text = it }, readOnly = submission.busy, modifier = Modifier.weight(1f).focusRequester(focus).padding(vertical = 14.dp), maxLines = 6,
                         textStyle = Type.body.copy(color = Mi.colors.text), cursorBrush = SolidColor(Mi.colors.text),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                         decorationBox = { inner ->
@@ -151,7 +152,7 @@ fun Composer(
                             }
                         },
                     )
-                    CircleButton(MiIcons.mic, "Dictate", { withMicrophone(::startDictation) }, size = 40.dp, fill = Color.Transparent, tint = Mi.colors.textSecondary)
+                    CircleButton(MiIcons.mic, "Dictate", { withMicrophone(::startDictation) }, size = 40.dp, fill = Color.Transparent, tint = Mi.colors.textSecondary, enabled = !submission.busy)
                 } else {
                     Text(if (dictating == Dictating.Recording) "Listening…" else "Writing it down…", style = Type.body, color = Mi.colors.textSecondary)
                     Spacer(Modifier.width(12.dp))
@@ -165,9 +166,18 @@ fun Composer(
             Spacer(Modifier.width(8.dp))
             val hasText = text.isNotBlank()
             if (hasText) {
-                CircleButton(MiIcons.arrowUp, "Send", { onSend(text.trim()); text = "" }, size = 52.dp, fill = colors.action, tint = colors.onAction)
+                CircleButton(MiIcons.arrowUp, if (submission.busy) "Sending" else "Send", {
+                    val draft = text
+                    scope.launch {
+                        try {
+                            if (submission.submit(draft, { if (text == draft) text = "" }) { onSend(it) }) onError(null)
+                        } catch (e: HubException) {
+                            onError(e.message)
+                        }
+                    }
+                }, size = 52.dp, fill = colors.action, tint = colors.onAction, enabled = !submission.busy && dictating == Dictating.Off)
             } else {
-                CircleButton(MiIcons.voiceA, "Talk to ${bot.name}", { withMicrophone(onCall) }, size = 52.dp, fill = colors.action, tint = colors.onAction, enabled = dictating == Dictating.Off)
+                CircleButton(MiIcons.voiceA, "Talk to ${bot.name}", { withMicrophone(onCall) }, size = 52.dp, fill = colors.action, tint = colors.onAction, enabled = dictating == Dictating.Off && !submission.busy)
             }
         }
     }

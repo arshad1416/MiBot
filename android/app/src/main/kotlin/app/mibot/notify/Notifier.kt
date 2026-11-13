@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -36,7 +37,9 @@ class Notifier(private val app: MiBotApp) {
     }
 
     val allowed: Boolean
-        get() = ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED && manager.areNotificationsEnabled()
+        get() = (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) &&
+            manager.areNotificationsEnabled()
 
     private fun openChat(botId: String?): PendingIntent {
         val intent = Intent(app, MainActivity::class.java).apply {
@@ -85,7 +88,7 @@ class Notifier(private val app: MiBotApp) {
             .setContentIntent(openChat(bot.id))
             .setAutoCancel(true)
             .build()
-        runCatching { manager.notify(bot.id.hashCode(), n) }
+        post(null, bot.id.hashCode(), n)
         // The hub's last line for a bot held up on a request also reads "Waiting for you: …".
         if (notice is Notice.Waiting || text.startsWith("Waiting for you")) waiting += bot.id else waiting -= bot.id
     }
@@ -111,7 +114,19 @@ class Notifier(private val app: MiBotApp) {
             .setAutoCancel(true)
             .apply { if (a.expiresAt > 0) setTimeoutAfter((a.expiresAt - System.currentTimeMillis()).coerceAtLeast(1_000)) }
             .build()
-        runCatching { manager.notify(APPROVAL_TAG, a.id.hashCode(), n) }
+        post(APPROVAL_TAG, a.id.hashCode(), n)
+    }
+
+    /** Recheck at the actual post, including revocation while the notification was built. */
+    private fun post(tag: String?, id: Int, notification: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        if (!manager.areNotificationsEnabled()) return
+        try {
+            manager.notify(tag, id, notification)
+        } catch (_: SecurityException) {
+            // Permission can be revoked between the check and the binder call.
+        }
     }
 
     /** The chat came on screen: what was said about it has been seen. */

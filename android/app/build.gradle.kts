@@ -6,6 +6,14 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val qaBuild = providers.gradleProperty("mibotQa").orNull == "true"
+
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variant ->
+        if (qaBuild) variant.enable = false // QA must never produce a production-package APK.
+    }
+}
+
 android {
     namespace = "app.mibot"
     compileSdk = 36
@@ -16,9 +24,19 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("boolean", "QA_MODE", qaBuild.toString())
     }
 
+    if (qaBuild) sourceSets.getByName("debug").java.srcDir("src/qa/kotlin")
+
     buildTypes {
+        debug {
+            if (qaBuild) {
+                applicationIdSuffix = ".qa"
+                versionNameSuffix = "-qa"
+                resValue("string", "app_name", "MiBot QA")
+            }
+        }
         release {
             isMinifyEnabled = false
             // Signed with the debug key so a release build installs on your own phone without a keystore.
@@ -49,6 +67,7 @@ kotlin {
 }
 
 dependencies {
+    testImplementation(libs.junit)
     implementation(project(":core"))
     implementation(libs.coroutines.android)
     implementation(platform(libs.compose.bom))
