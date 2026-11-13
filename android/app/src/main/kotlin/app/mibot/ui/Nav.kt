@@ -37,6 +37,8 @@ sealed interface Dest {
     data object Settings : Dest
     /** `botId`: the bot whose switches to show for each connected app, or null from Settings. */
     data class Apps(val botId: String?) : Dest
+    /** What waits for the person. `focusId`: the request a notification opened. */
+    data class Approvals(val focusId: String? = null) : Dest
     /** A page of the web app, shown inside this one. `path` is on the hub, such as "/settings/models". */
     data class Web(val title: String, val path: String) : Dest
 }
@@ -69,6 +71,13 @@ class Nav {
         stack.addAll(listOf(Dest.Home, Dest.Chat(botId)))
     }
 
+    /** Leave whatever is open and show this screen over the bot list, as a notification does. */
+    fun open(dest: Dest) {
+        forward = true
+        stack.clear()
+        stack.addAll(listOf(Dest.Home, dest))
+    }
+
     /** Back to the bot list, as after a bot is deleted. */
     fun home() {
         forward = false
@@ -82,26 +91,27 @@ val LocalHub = staticCompositionLocalOf<HubSession> { error("Not signed in") }
 val LocalApp = staticCompositionLocalOf<MiBotApp> { error("No app here") }
 
 @Composable
-fun Root(app: MiBotApp, openBot: MutableState<String?>) {
+fun Root(app: MiBotApp, opening: MutableState<Dest?>) {
     Box(Modifier.fillMaxSize().background(Mi.colors.bg)) {
         CompositionLocalProvider(LocalApp provides app) {
             val hub = app.hub
             if (hub == null) PairScreen(onPaired = app::signIn)
             else key(hub) {
-                CompositionLocalProvider(LocalHub provides hub) { Screens(openBot) }
+                CompositionLocalProvider(LocalHub provides hub) { Screens(opening) }
             }
         }
     }
 }
 
 @Composable
-private fun Screens(openBot: MutableState<String?>) {
+private fun Screens(opening: MutableState<Dest?>) {
     val nav = remember { Nav() }
     val holder = rememberSaveableStateHolder()
-    LaunchedEffect(openBot.value) {
-        openBot.value?.let {
-            nav.openChat(it)
-            openBot.value = null
+    // A notification was tapped: show what it is about.
+    LaunchedEffect(opening.value) {
+        opening.value?.let {
+            nav.open(it)
+            opening.value = null
         }
     }
     BackHandler(enabled = nav.stack.size > 1) { nav.back() }
@@ -128,6 +138,7 @@ private fun Screens(openBot: MutableState<String?>) {
                     is Dest.Computer -> ComputerScreen(dest.botId)
                     Dest.Settings -> SettingsScreen()
                     is Dest.Apps -> AppsScreen(dest.botId)
+                    is Dest.Approvals -> ApprovalsScreen(dest.focusId)
                     is Dest.Web -> WebScreen(dest.title, dest.path)
                 }
             }

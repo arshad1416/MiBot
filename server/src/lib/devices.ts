@@ -15,6 +15,7 @@ function browserName(userAgent: string): string | null {
  */
 export function describeDevice(userAgent: string): Pick<Device, 'name' | 'kind'> & { phrase: string } {
   const app = /^MiBot-Android\/\S+ \([^;]*; ([^)]{1,40})\)/.exec(userAgent);
+  if (/^MiBot-Mac/.test(userAgent)) return { phrase: 'the MiBot app on a Mac', name: 'MiBot app on Mac', kind: 'computer' };
   if (/^MiBot-Android/.test(userAgent)) return { phrase: 'the MiBot app on an Android phone', name: `MiBot app on Android${app ? ` (${app[1].trim()})` : ''}`, kind: 'phone' };
   const browser = browserName(userAgent);
   const named = (phrase: string, name: string, kind: Device['kind']) => ({ phrase, name: browser ? `${name} · ${browser}` : name, kind });

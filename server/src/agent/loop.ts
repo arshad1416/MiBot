@@ -254,6 +254,8 @@ export async function requestApproval(
     detail: describeArgs(args), tool: pol.key, toolkit: pol.toolkit, toolkitName: tk?.name, logo: tk?.logo, args, status: 'pending',
   });
   db.prepare('INSERT INTO approvals(id,bot_id,row_seq,call_id,tool,status,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?)').run(approvalId, botId, card.seq, '', pol.key, 'pending', now(), now() + APPROVAL_WAIT_MS);
+  // Before the bot's live state says it waits, so a device that hears both knows it is for this request.
+  announceApproval(approvalId);
   db.prepare('UPDATE bots SET unread = unread + 1 WHERE id=?').run(botId);
   if (rowSeq !== null) patchToolRow(botId, rowSeq, { status: 'awaiting-approval' });
   setLive(botId, { isRunning: false, activity: { kind: 'waiting_for_you', since: now() }, awaiting: { reason: humanizeSlug(pol.key), since: now() } });
@@ -264,7 +266,6 @@ export async function requestApproval(
   const decision = await new Promise<ApprovalDecision>((resolve) => {
     waiters.set(approvalId, { botId, resolve });
     timer = setTimeout(() => expireApproval(approvalId), APPROVAL_WAIT_MS);
-    announceApproval(approvalId);
   });
   clearTimeout(timer);
   waiters.delete(approvalId);

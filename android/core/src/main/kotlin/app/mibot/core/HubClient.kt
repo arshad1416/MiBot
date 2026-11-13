@@ -52,6 +52,11 @@ data class PairLink(val hubUrl: String, val code: String)
 @Serializable data class BotResponse(val bot: Bot)
 @Serializable data class UrlResponse(val url: String = "")
 @Serializable private data class TextResponse(val text: String = "")
+@Serializable data class ApprovalsResponse(val approvals: List<Approval> = emptyList(), val serverTime: Long = 0)
+@Serializable private data class DecisionResponse(val approval: Approval? = null, val error: String? = null)
+
+/** What answering an approval led to: `approval` as it now stands, and `error` when another answer, or the clock, got there first. */
+data class Decision(val approval: Approval, val error: String? = null)
 
 /** What a voice call needs to open its line to the voice service: a short-lived secret, the address, and the session settings to send first. */
 @Serializable data class VoiceSession(val callId: String, val clientSecret: String, val websocketUrl: String, val sampleRate: Int = 24_000, val session: JsonObject = JsonObject(emptyMap()))
@@ -109,8 +114,24 @@ class HubClient(val account: HubAccount, base: OkHttpClient = defaultHttp, priva
     suspend fun interrupt(botId: String) = send("POST", "/bots/$botId/interrupt")
     suspend fun newConversation(botId: String) = send("POST", "/bots/$botId/fresh")
 
-    /** `decision`: allow | always | deny. */
-    suspend fun decide(approvalId: String, decision: String) = send("POST", "/approvals/$approvalId", json { put("decision", decision) })
+    /** Approvals waiting for an answer; with `sinceMs`, also those answered or expired since then. */
+    suspend fun approvals(sinceMs: Long? = null) = call(ApprovalsResponse.serializer(), "GET", "/approvals" + (sinceMs?.let { "?since=$it" } ?: ""))
+
+    /**
+     * Answer an approval. `decision`: once | always | deny. When another device answered first, or it
+     * ran out, the hub says so (409) and the result carries the answer that stood.
+     */
+    suspend fun decide(approvalId: String, decision: String): Decision = withContext(Dispatchers.IO) {
+        val req = request("POST", "/approvals/$approvalId", json { put("decision", decision) })
+        val res = try { http.newCall(req).execute() } catch (e: IOException) { throw HubException(0, unreachable(e)) }
+        res.use {
+            val text = it.body?.string().orEmpty()
+            if (it.code != 409 && !it.isSuccessful) throw failure(it.code, text)
+            val read = runCatching { HubJson.decodeFromString(DecisionResponse.serializer(), text) }.getOrNull()
+            val approval = read?.approval ?: throw HubException(it.code, "The hub sent something this app does not understand.")
+            Decision(approval, if (it.code == 409) read.error ?: "This request was already answered." else null)
+        }
+    }
     suspend fun answer(botId: String, seq: Int, answer: String) = send("POST", "/bots/$botId/cards/$seq/answer", json { put("answer", answer) })
     suspend fun dismiss(botId: String, seq: Int) = send("POST", "/bots/$botId/cards/$seq/dismiss")
 
@@ -234,16 +255,17 @@ class HubClient(val account: HubAccount, base: OkHttpClient = defaultHttp, priva
             else -> "Could not reach the hub."
         }
 
-        private fun failure(res: Response): HubException {
-            val text = runCatching { res.body?.string() }.getOrNull().orEmpty()
+        private fun failure(res: Response): HubException = failure(res.code, runCatching { res.body?.string() }.getOrNull().orEmpty())
+
+        private fun failure(code: Int, text: String): HubException {
             val said = runCatching { HubJson.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.contentOrNull }.getOrNull()
             val message = when {
-                res.code == 401 -> "This device is no longer signed in."
+                code == 401 -> "This device is no longer signed in."
                 !said.isNullOrBlank() && said != "not found" -> said
-                res.code == 404 -> "The hub no longer has that."
-                else -> "The hub answered with an error (${res.code})."
+                code == 404 -> "The hub no longer has that."
+                else -> "The hub answered with an error ($code)."
             }
-            return HubException(res.code, message)
+            return HubException(code, message)
         }
 
         private fun <T> execute(http: OkHttpClient, req: Request, read: (Response) -> T): T {

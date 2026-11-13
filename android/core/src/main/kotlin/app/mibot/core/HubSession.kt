@@ -89,6 +89,35 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
         loadBots()
         _state.update { it.copy(computer = client.computer()) }
         openBotId?.let { loadRows(it) }
+        loadApprovals()
+    }
+
+    /**
+     * Fetch what waits for the person, and what became of the requests this device last saw waiting:
+     * after a reconnect, or when the app comes back, nothing it shows is stale.
+     */
+    suspend fun loadApprovals() {
+        val since = _state.value.pendingApprovals.minOfOrNull { it.createdAt }
+        val r = client.approvals(since)
+        val before = _state.value
+        _state.update { it.withApprovals(r.approvals, r.serverTime, System.currentTimeMillis()) }
+        // Tell the notifications what changed while the line was down, as if each change had been pushed.
+        for (a in _state.value.approvals.values) {
+            val held = before.approvals[a.id]
+            val bot = _state.value.bot(a.botId) ?: Bot(id = a.botId, name = a.botName)
+            if (a.pending && held == null) _notices.tryEmit(Notice.ApprovalNeeded(bot, a))
+            else if (!a.pending && held?.pending == true) _notices.tryEmit(Notice.ApprovalSettled(bot, a))
+        }
+    }
+
+    /**
+     * Answer an approval. The hub takes one answer per request, from whichever device is first; the
+     * result says what stood, and an error when it was not this one.
+     */
+    suspend fun decide(approvalId: String, decision: String): Decision {
+        val d = client.decide(approvalId, decision)
+        _state.update { it.withApproval(d.approval) }
+        return d
     }
 
     suspend fun loadBots() {

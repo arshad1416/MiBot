@@ -261,6 +261,45 @@ data class Toolkit(
 @Serializable
 data class VoiceOption(val id: String, val name: String = "", val gender: String? = null)
 
+/**
+ * A request a bot made that waits for the person, as the hub lists it (GET /api/approvals) and
+ * pushes it when it changes. Answered at most once, from any device.
+ */
+@Serializable
+data class Approval(
+    val id: String,
+    val botId: String = "",
+    val botName: String = "",
+    val title: String = "",
+    /** What it will do, a line per argument. */
+    val detail: String = "",
+    val tool: String = "",
+    val toolkitName: String? = null,
+    val args: JsonElement? = null,
+    val rowSeq: Int = 0,
+    /** pending | allowed | always | denied | expired */
+    val status: String = "pending",
+    val createdAt: Long = 0,
+    val expiresAt: Long = 0,
+    val resolvedAt: Long? = null,
+    /** The device that answered it. */
+    val resolvedBy: String? = null,
+) {
+    val pending get() = status == "pending"
+
+    /** Whether it can still be answered, by the hub's clock (`skewMs` = hub time minus this phone's time). */
+    fun answerable(nowMs: Long, skewMs: Long = 0) = pending && (expiresAt == 0L || nowMs + skewMs < expiresAt)
+
+    /** What became of it, for a request that can no longer be answered. */
+    val outcome: String
+        get() = when (status) {
+            "allowed", "always" -> "Approved" + (resolvedBy?.let { " on $it" } ?: "")
+            "denied" -> "Denied" + (resolvedBy?.let { " on $it" } ?: "")
+            "expired" -> "Expired before anyone answered"
+            else -> "Waiting for you"
+        }
+}
+
 /** What the hub pushes on GET /api/events. */
 @Serializable(with = ServerEventSerializer::class)
 sealed interface ServerEvent {
@@ -273,6 +312,8 @@ sealed interface ServerEvent {
     @Serializable data class Computer(val state: ComputerState) : ServerEvent
     @Serializable data class Routines(val botId: String) : ServerEvent
     @Serializable data object Connections : ServerEvent
+    /** An approval was asked for, answered or ran out. */
+    @Serializable data class ApprovalChanged(val approval: Approval) : ServerEvent
     /** Pings, and kinds this app does not act on. */
     @Serializable data object Other : ServerEvent
 }
@@ -288,6 +329,7 @@ object ServerEventSerializer : JsonContentPolymorphicSerializer<ServerEvent>(Ser
         "computer" -> ServerEvent.Computer.serializer()
         "routines" -> ServerEvent.Routines.serializer()
         "connections" -> ServerEvent.Connections.serializer()
+        "approval" -> ServerEvent.ApprovalChanged.serializer()
         else -> ServerEvent.Other.serializer()
     }
 }

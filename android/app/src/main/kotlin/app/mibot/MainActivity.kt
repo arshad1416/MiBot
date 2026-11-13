@@ -7,26 +7,31 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
 import app.mibot.notify.HubService
+import app.mibot.ui.Dest
 import app.mibot.ui.MiBotTheme
 import app.mibot.ui.Root
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as MiBotApp
 
-    /** A chat to open: the one whose notification was tapped. */
-    private val openBot = mutableStateOf<String?>(null)
+    /** What a tapped notification is about: a chat, or a request waiting for an answer. Never answers anything itself. */
+    private val opening = mutableStateOf<Dest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        openBot.value = intent?.getStringExtra(EXTRA_BOT)
-        setContent { MiBotTheme { Root(app, openBot) } }
+        // Only on a fresh start: after a rotation the screen that was open stays.
+        if (savedInstanceState == null) opening.value = target(intent)
+        setContent { MiBotTheme { Root(app, opening) } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra(EXTRA_BOT)?.let { openBot.value = it }
+        target(intent)?.let { opening.value = it }
     }
+
+    private fun target(intent: Intent?): Dest? =
+        intent?.getStringExtra(EXTRA_APPROVAL)?.let { Dest.Approvals(it) } ?: intent?.getStringExtra(EXTRA_BOT)?.let { Dest.Chat(it) }
 
     override fun onStart() {
         super.onStart()
@@ -44,5 +49,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_BOT = "app.mibot.bot"
+        const val EXTRA_APPROVAL = "app.mibot.approval"
     }
 }

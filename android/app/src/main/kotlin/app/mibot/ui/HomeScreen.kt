@@ -97,6 +97,8 @@ fun HomeScreen() {
             )
         }
 
+        ApprovalsStrip(state.pendingApprovals.size) { nav.go(Dest.Approvals()) }
+
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 12.dp)) {
             if (primary != null) {
                 item(key = "primary") { PrimaryBot(primary, state.live[primary.id]) { nav.go(Dest.Chat(primary.id)) } }

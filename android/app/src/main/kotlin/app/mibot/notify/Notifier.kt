@@ -16,6 +16,7 @@ import app.mibot.MiBotApp
 import app.mibot.R
 import app.mibot.core.Notice
 import app.mibot.ui.avatarBitmap
+import app.mibot.ui.commandLines
 
 /** Says on the phone what a bot would otherwise only say in its chat: it finished, or it is waiting for you. */
 class Notifier(private val app: MiBotApp) {
@@ -24,6 +25,9 @@ class Notifier(private val app: MiBotApp) {
     init {
         manager.createNotificationChannel(NotificationChannel(BOTS, "Bots", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "A bot finished, or is waiting for you."
+        })
+        manager.createNotificationChannel(NotificationChannel(APPROVALS, "Requests to approve", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "A bot asks before doing something. Tapping opens the request; it is never approved from the notification."
         })
         manager.createNotificationChannel(NotificationChannel(LINE, "Connection", NotificationManager.IMPORTANCE_MIN).apply {
             description = "Shown while MiBot stays connected to your hub. Safe to hide."
@@ -42,12 +46,28 @@ class Notifier(private val app: MiBotApp) {
         return PendingIntent.getActivity(app, botId?.hashCode() ?: 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
+    private fun openApproval(approvalId: String): PendingIntent {
+        val intent = Intent(app, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(MainActivity.EXTRA_APPROVAL, approvalId)
+        }
+        return PendingIntent.getActivity(app, approvalId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
     fun show(notice: Notice) {
         val bot = notice.bot
+        when (notice) {
+            // Answered here or elsewhere, or ran out: nothing left to tap.
+            is Notice.ApprovalSettled -> return manager.cancel(APPROVAL_TAG, notice.approval.id.hashCode())
+            // A request goes through even for a bot that is muted: it holds the bot's work until someone answers.
+            is Notice.ApprovalNeeded -> return if (app.store.notifications && allowed) approval(notice) else Unit
+            else -> {}
+        }
         if (!app.store.notifications || !app.store.notifies(bot.id) || !allowed) return
         val text = when (notice) {
             is Notice.Finished -> notice.preview
             is Notice.Waiting -> "Waiting for you: ${notice.reason}"
+            is Notice.ApprovalNeeded, is Notice.ApprovalSettled -> return
         }
         val dark = (app.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         val n = NotificationCompat.Builder(app, BOTS)
@@ -61,6 +81,27 @@ class Notifier(private val app: MiBotApp) {
             .setAutoCancel(true)
             .build()
         runCatching { manager.notify(bot.id.hashCode(), n) }
+    }
+
+    private fun approval(notice: Notice.ApprovalNeeded) {
+        val a = notice.approval
+        val details = commandLines(a)
+        val text = if (details.isBlank()) a.title else "${a.title}\n$details"
+        val dark = (app.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        val n = NotificationCompat.Builder(app, APPROVALS)
+            .setSmallIcon(R.drawable.ic_stat_bot)
+            .setLargeIcon(avatarBitmap(notice.bot.avatarShape, notice.bot.avatarColor, dark, LARGE_ICON_PX))
+            .setContentTitle("${a.botName.ifBlank { notice.bot.name }} asks first")
+            .setContentText(a.title)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // Opens the request; there are no Approve or Deny buttons on the notification itself.
+            .setContentIntent(openApproval(a.id))
+            .setAutoCancel(true)
+            .apply { if (a.expiresAt > 0) setTimeoutAfter((a.expiresAt - System.currentTimeMillis()).coerceAtLeast(1_000)) }
+            .build()
+        runCatching { manager.notify(APPROVAL_TAG, a.id.hashCode(), n) }
     }
 
     /** The chat came on screen: what was said about it has been seen. */
@@ -81,6 +122,8 @@ class Notifier(private val app: MiBotApp) {
     private companion object {
         const val BOTS = "bots"
         const val LINE = "connection"
+        const val APPROVALS = "approvals"
+        const val APPROVAL_TAG = "approval"
         const val LARGE_ICON_PX = 192
     }
 }

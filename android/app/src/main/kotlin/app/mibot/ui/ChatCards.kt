@@ -34,6 +34,9 @@ import app.mibot.core.CardBody
 import app.mibot.core.ConnectCard
 import app.mibot.core.DraftCard
 import app.mibot.core.HubClient
+import app.mibot.core.HubException
+import androidx.compose.ui.text.font.FontFamily
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.mibot.core.QuestionCard
 import app.mibot.core.Row as ChatRow
 import app.mibot.core.appName
@@ -89,14 +92,19 @@ internal fun CardView(row: ChatRow, body: CardBody, bot: Bot, run: Run) {
             is ApprovalCard -> {
                 val app = body.toolkitName ?: body.toolkit?.let(::appName)
                 CardHead(app ?: bot.name, body.logo, body.title.ifBlank { "${bot.name} wants to ${toolName(body.tool).lowercase()}" }, if (app != null) toolName(body.tool) else null)
-                if (body.detail.isNotBlank()) Text(body.detail, style = Type.small, color = Mi.colors.textSecondary, maxLines = 12, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
-                if (body.status == "pending") {
+                if (body.detail.isNotBlank()) Text(body.detail, style = Type.small.copy(fontFamily = FontFamily.Monospace), color = Mi.colors.textSecondary, maxLines = 12, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
+                // The hub's copy says who answered and when it runs out; the card in the chat may lag behind it.
+                val state by hub.state.collectAsStateWithLifecycle()
+                val held = state.approvals[body.approvalId]
+                rememberTicker(5_000)
+                val open = body.status == "pending" && (held == null || held.answerable(System.currentTimeMillis(), state.clockSkewMs))
+                if (open) {
+                    val decide = { decision: String -> run { hub.decide(body.approvalId, decision).error?.let { throw HubException(409, it) } } }
                     Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PillButton("Deny", { run { hub.client.decide(body.approvalId, "deny") } }, Modifier.weight(1f), primary = false)
-                        PillButton("Allow", { run { hub.client.decide(body.approvalId, "allow") } }, Modifier.weight(1f), color = colors.action, onColor = colors.onAction)
+                        PillButton("Deny", { decide("deny") }, Modifier.weight(1f), primary = false)
+                        PillButton("Approve once", { decide("once") }, Modifier.weight(1f), color = colors.action, onColor = colors.onAction)
                     }
-                    TextLink("Always allow this", { run { hub.client.decide(body.approvalId, "always") } }, Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
-                } else CardOutcome(when (body.status) { "allowed" -> "Allowed"; "always" -> "Always allowed"; "denied" -> "Denied"; else -> "No longer needed" })
+                } else CardOutcome(held?.takeIf { !it.pending }?.outcome ?: when (body.status) { "allowed" -> "Approved"; "always" -> "Always allowed"; "denied" -> "Denied"; "expired" -> "Expired before anyone answered"; else -> "Expired before anyone answered" })
             }
 
             is QuestionCard -> {
