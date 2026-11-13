@@ -230,7 +230,10 @@ function approvalOf(ap: any): Approval {
 
 function announceApproval(approvalId: string) {
   const ap = db.prepare(`${APPROVAL_SELECT} WHERE a.id=?`).get(approvalId) as any;
-  if (ap) hub.emit(ap.user_id, { type: 'approval', approval: approvalOf(ap) });
+  if (!ap) return;
+  hub.emit(ap.user_id, { type: 'approval', approval: approvalOf(ap) });
+  // Once answered or expired, the bot's last line ("Waiting for you: …") changes with it.
+  if (ap.status !== 'pending') emitBot(ap.bot_id);
 }
 
 /** The person's approvals still waiting, oldest first, and, with `sinceMs`, those answered or expired since then. */

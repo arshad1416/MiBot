@@ -43,6 +43,7 @@ function device(cookie, userAgent) {
     return { status: res.status, body: await res.json().catch(() => null) };
   };
   const seen = [];
+  const previews = [];
   const ctrl = new AbortController();
   streams.push(ctrl);
   fetch(`${HUB}/api/events`, { headers: { cookie, 'user-agent': userAgent }, signal: ctrl.signal }).then(async (res) => {
@@ -53,11 +54,12 @@ function device(cookie, userAgent) {
         const data = buf.slice(0, i).split('\n').find((l) => l.startsWith('data: '));
         const ev = data ? JSON.parse(data.slice(6)) : null;
         if (ev?.type === 'approval') seen.push(ev.approval);
+        if (ev?.type === 'bot') previews.push(ev.bot.lastPreview ?? '');
       }
     }
   }).catch(() => {});
   const latest = (id) => seen.filter((a) => a.id === id).pop();
-  return { call, seen, latest, answer: (id, decision) => call('POST', `/approvals/${id}`, { decision }) };
+  return { call, seen, previews, latest, answer: (id, decision) => call('POST', `/approvals/${id}`, { decision }) };
 }
 
 /** The Bot's agent calls a tool that needs an OK, the way Hermes does over MCP. Resolves with the tool's answer. */
@@ -116,6 +118,8 @@ try {
   check('the call is stopped', /declined this action/.test(await third));
   await until('the phone to hear it', async () => phone.latest(three.id)?.status === 'denied');
   check('the phone hears it was denied', true);
+  await until("the bot's last line to say so", async () => phone.previews.at(-1)?.startsWith('Denied: '), 5_000).catch(() => {});
+  check("the bot's last line no longer says it is waiting", phone.previews.at(-1)?.startsWith('Denied: '), phone.previews.at(-1));
 
   // 4. Nobody answers: it runs out, and then cannot be answered.
   const fourth = botAsks(botId, 4);
