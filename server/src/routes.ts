@@ -7,7 +7,8 @@ import { newId } from './lib/ids.js';
 import { hub } from './lib/hub.js';
 import { createSession, destroySession, isOwnerKey, requireUser, sessionToken, userFromCookieHeader, userFromToken, type AuthVars } from './lib/auth.js';
 import { allLive, appendRow, clearConversation, emitBot, getBot, getBotRow, getRow, listBots, listRoutines, listRows, listTasks, toRoutine, updateRow } from './store.js';
-import { enqueue, interrupt, resolveApproval } from './agent/loop.js';
+import { ApprovalGone, enqueue, interrupt, listApprovals, resolveApproval } from './agent/loop.js';
+import { describeDevice } from './lib/devices.js';
 import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen, suspendComputer } from './computer.js';
 import { assignEngine, provisionEngine, removeEngine, syncPersona } from './engine.js';
 import { deleteMemory, listMemories, memoryBot } from './engine-memory.js';
@@ -295,10 +296,26 @@ api.post('/bots/:id/fresh', (c) => {
   return c.json({ ok: true });
 });
 
+/** Approvals waiting for an answer; `since` (ms) adds those answered or expired since then, for a device that was away. */
+api.get('/approvals', (c) => {
+  const since = Number(c.req.query('since'));
+  return c.json({ approvals: listApprovals(c.get('user').id, Number.isFinite(since) && since > 0 ? since : undefined), serverTime: now() });
+});
+
+const DECISIONS = new Set(['once', 'allow', 'always', 'deny']);
+
 api.post('/approvals/:id', async (c) => {
-  const { decision } = await c.req.json<{ decision: 'allow' | 'always' | 'deny' }>();
-  try { resolveApproval(c.get('user').id, c.req.param('id'), decision); } catch { return c.json({ error: 'not found' }, 404); }
-  return c.json({ ok: true });
+  const p = await c.req.json().catch(() => null);
+  const decision = p && typeof p === 'object' ? (p as any).decision : undefined;
+  if (!DECISIONS.has(decision)) return c.json({ error: 'decision must be once, always or deny' }, 400);
+  try {
+    const approval = resolveApproval(c.get('user').id, c.req.param('id'), decision, describeDevice(c.req.header('user-agent') ?? '').name);
+    return c.json({ ok: true, approval });
+  } catch (e) {
+    // Answered elsewhere first, or ran out: say what happened, so the device stops offering buttons.
+    if (e instanceof ApprovalGone) return c.json({ error: e.message, approval: e.approval }, 409);
+    return c.json({ error: 'not found' }, 404);
+  }
 });
 
 api.post('/bots/:id/cards/:seq/answer', async (c) => {

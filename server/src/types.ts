@@ -353,6 +353,33 @@ export interface Toolkit {
   bots?: string[];
 }
 
+/**
+ * A request a Bot made that waits for the person: everything a phone or the Mac app needs to show
+ * it and answer it, without the conversation it sits in.
+ */
+export interface Approval {
+  id: string;
+  botId: string;
+  botName: string;
+  /** "Allow Scout to send an email?" */
+  title: string;
+  /** What it will do, a line per argument. */
+  detail: string;
+  /** The tool's name, such as gmail_send_email. */
+  tool: string;
+  toolkitName?: string;
+  args: unknown;
+  /** The row in the conversation that shows it. */
+  rowSeq: number;
+  status: 'pending' | 'allowed' | 'always' | 'denied' | 'expired';
+  createdAt: number;
+  /** When it stops waiting; after that it is expired whatever happens. */
+  expiresAt: number;
+  resolvedAt: number | null;
+  /** The device that answered it, such as "MiBot app on Android (CPH2655)". */
+  resolvedBy: string | null;
+}
+
 /** Server-sent events on GET /api/events */
 export type ServerEvent =
   | { type: 'hello'; serverTime: number }
@@ -367,4 +394,6 @@ export type ServerEvent =
   | { type: 'memories'; botId: string }
   | { type: 'connections' }
   | { type: 'machines' }
+  /** One approval changed: it was asked for, answered or ran out. Each device updates its copy. */
+  | { type: 'approval'; approval: Approval }
   | { type: 'ping' };
