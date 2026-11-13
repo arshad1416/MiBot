@@ -24,6 +24,12 @@ const SECTIONS: { id: AppSection; label: string }[] = [
   { id: 'account', label: 'Account' },
 ];
 
+/**
+ * Opened inside the phone app ("/?settings=machines&embed=1"): the app has its own title bar and back
+ * button, so the page shows only the section, without its list of sections or a way out.
+ */
+const EMBEDDED = new URLSearchParams(location.search).has('embed');
+
 /** Full-window settings page, opened from the account menu. */
 export function AppSettings() {
   const section = useConfigUI((s) => s.appSettings);
@@ -36,8 +42,8 @@ export function AppSettings() {
   }, [close]);
   if (!section) return null;
   return createPortal(
-    <div className="app-settings" role="dialog" aria-modal="true" aria-label="Settings">
-      <aside className="app-settings__nav">
+    <div className={`app-settings${EMBEDDED ? ' app-settings--embedded' : ''}`} role="dialog" aria-modal="true" aria-label="Settings">
+      <aside className="app-settings__nav" hidden={EMBEDDED}>
         <button type="button" className="app-settings__back" onClick={close}><Glyph name="arrow_left" size={14} /> Back to Bots</button>
         <div className="app-settings__heading">Settings</div>
         {SECTIONS.map((s) => (
@@ -47,7 +53,7 @@ export function AppSettings() {
         ))}
       </aside>
       <div className="app-settings__main">
-        <button type="button" className="app-settings__close icon-btn" onClick={close} aria-label="Close settings" title="Close (Esc)"><Icon name="close" opacity={0.8} /></button>
+        {!EMBEDDED && <button type="button" className="app-settings__close icon-btn" onClick={close} aria-label="Close settings" title="Close (Esc)"><Icon name="close" opacity={0.8} /></button>}
         <div className="app-settings__page">
           {section === 'general' && <GeneralSection />}
           {section === 'models' && <ModelsSection />}

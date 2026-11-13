@@ -252,7 +252,8 @@ fun WebScreen(title: String, path: String) {
             AndroidView(
                 modifier = Modifier.fillMaxSize().imePadding(),
                 factory = { context ->
-                    val address = hub.client.url(path)
+                    // embed=1: the page leaves out its own section list and close button; this screen has its title and back.
+                    val address = hub.client.url(path + (if ('?' in path) "&" else "?") + "embed=1")
                     CookieManager.getInstance().apply {
                         setAcceptCookie(true)
                         setCookie(address, "${hub.client.cookie}; Path=/")
@@ -260,9 +261,7 @@ fun WebScreen(title: String, path: String) {
                     WebView(context).apply {
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
-                        // The web app is laid out for a wide screen: show all of it, and let the person zoom.
-                        settings.useWideViewPort = true
-                        settings.loadWithOverviewMode = true
+                        // The page lays itself out for a phone; zooming is still there for small print.
                         settings.builtInZoomControls = true
                         settings.displayZoomControls = false
                         webViewClient = object : WebViewClient() {
