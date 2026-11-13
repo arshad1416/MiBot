@@ -266,11 +266,19 @@ try {
   const alone = await run('after hours');
   check('a job goes ahead when Jev cannot be reached', alone.choice.by === 'bot' && said(await rows(bot.id), 'Jev could not be asked'));
 
-  // Guessing closes pairing for a while, the open codes included.
+  // Guessing shuts the guesser out for a while, and nobody else: the code still works from another address.
   const openCode = await api('POST', '/pair/codes', {});
-  const guess = (code) => fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  const guess = (code, headers = {}) => fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ code }) });
   for (let i = 0; i < 10; i++) await guess('ZZZZZZZ' + (i % 8 + 2));
-  check('too many wrong codes close pairing', (await guess(openCode.code)).status === 400 && (await api('GET', `/pair/codes/${openCode.id}`)).state === 'expired');
+  check('too many wrong codes shut the guesser out', (await guess(openCode.code)).status === 400 && (await api('GET', `/pair/codes/${openCode.id}`)).state === 'open');
+  check('a page on another site cannot hand in a code', (await guess(openCode.code, { 'x-forwarded-for': '100.64.0.9', origin: 'https://elsewhere.example' })).status === 403);
+  for (const body of ['null', '{"code":12345678}', '{"code":["A"]}', '']) {
+    const res = await fetch(`${HUB}/api/pair/sign-in`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '100.64.0.9' }, body });
+    if (res.status !== 400) check(`a body of ${body || 'nothing'} is turned down politely`, false);
+  }
+  check('and the owner’s code still works from elsewhere', (await guess(openCode.code, { 'x-forwarded-for': '100.64.0.9' })).status === 200);
+  const odd = await fetch(`${HUB}/api/auth/me`, { headers: { cookie: 'grokbot_session=%E0%A4%A' } });
+  check('a cookie that does not decode is nobody’s', odd.status === 200 && (await odd.json()).user === null);
 } catch (e) {
   console.error(`FAIL  ${e.message}`);
   failed = true;

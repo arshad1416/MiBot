@@ -34,8 +34,10 @@ export function createSession(c: Context, userId: string) {
 
 export function destroySession(c: Context) {
   const t = getCookie(c, COOKIE);
-  if (t) db.prepare('DELETE FROM auth_sessions WHERE token=?').run(t);
+  const owner = t ? (db.prepare('DELETE FROM auth_sessions WHERE token=? RETURNING user_id').get(t) as { user_id: string } | undefined) : undefined;
   deleteCookie(c, COOKIE, { path: '/' });
+  // Wakes this user's open event streams; the one that belonged to this sign-in ends itself.
+  if (owner) hub.emit(owner.user_id, { type: 'machines' });
 }
 
 export function userFromToken(t: string | undefined): User | null {
@@ -73,7 +75,9 @@ export function removeDevice(userId: string, id: string): boolean {
 
 export function userFromCookieHeader(cookieHeader: string | undefined): User | null {
   const m = cookieHeader?.split(/;\s*/).find((p) => p.startsWith(`${COOKIE}=`));
-  return userFromToken(m ? decodeURIComponent(m.slice(COOKIE.length + 1)) : undefined);
+  if (!m) return null;
+  // A cookie is whatever the sender likes; one that does not decode is nobody's.
+  try { return userFromToken(decodeURIComponent(m.slice(COOKIE.length + 1))); } catch { return null; }
 }
 
 export const requireUser: MiddlewareHandler<AuthVars> = async (c, next) => {

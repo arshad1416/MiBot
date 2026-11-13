@@ -59,8 +59,11 @@ function findOrCreateUser(email: string, name?: string, preferId?: string) {
   if (existing) return { id: existing.id as string, isNew: false };
   if (env.allowedEmails.length && !env.allowedEmails.includes(email.toLowerCase())) throw new UserError('This account is not allowed to sign in here.');
   const id = preferId ?? newId('usr');
-  db.prepare('INSERT INTO users(id,email,name,created_at) VALUES (?,?,?,?)').run(id, email, name ?? email.split('@')[0], now());
-  createBot(id, { name: env.primaryBotName, label: env.primaryBotLabel, description: 'Your main point of contact. Checks in proactively and coordinates work with your other Bots.', avatarShape: 'blob', avatarColor: 'black', isPrimary: true });
+  // Together or not at all: when the team is full there is no bot for a new person, so no account is left behind either.
+  db.transaction(() => {
+    db.prepare('INSERT INTO users(id,email,name,created_at) VALUES (?,?,?,?)').run(id, email, name ?? email.split('@')[0], now());
+    createBot(id, { name: env.primaryBotName, label: env.primaryBotLabel, description: 'Your main point of contact. Checks in proactively and coordinates work with your other Bots.', avatarShape: 'blob', avatarColor: 'black', isPrimary: true });
+  })();
   return { id, isNew: true };
 }
 
@@ -165,11 +168,11 @@ api.get('/events', (c) => {
     stream.onAbort(() => { unsub(); wake?.(); });
     await stream.writeSSE({ data: JSON.stringify({ type: 'hello', serverTime: now() }) });
     while (!stream.aborted) {
+      // A device that was signed out, here or from Settings, gets nothing more.
+      if (!userFromToken(session)) break;
       if (!queue.length) {
         await Promise.race([new Promise<void>((r) => (wake = r)), new Promise((r) => setTimeout(r, 20_000))]);
         wake = null;
-        // A device signed out from Settings gets nothing more.
-        if (!userFromToken(session)) break;
         if (!queue.length) { await stream.writeSSE({ data: JSON.stringify({ type: 'ping' }) }); continue; }
       }
       while (queue.length) await stream.writeSSE({ data: queue.shift()! });
