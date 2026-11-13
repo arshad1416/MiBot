@@ -1,8 +1,7 @@
 package app.mibot.core
 
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 
 /* The words for what a bot is doing, the same ones the web app uses (web/src/lib/phrases.ts). */
 
@@ -33,7 +32,8 @@ private fun nice(s: String?) = !s.isNullOrEmpty() && !s.contains('_') && !Regex(
 
 private fun messagedName(live: LiveState, rows: List<Row>): String? {
     val running = rows.lastOrNull { (it.body as? ToolCallBody)?.status == "running" }?.body as? ToolCallBody
-    (running?.args as? JsonObject)?.get("bot_name")?.jsonPrimitive?.contentOrNull?.let { return it }
+    // The model wrote these arguments; a name that is not text is ignored, as the web app does.
+    ((running?.args as? JsonObject)?.get("bot_name") as? JsonPrimitive)?.takeIf { it.isString }?.content?.let { return it }
     return live.activity?.detail?.takeIf { nice(it) }
 }
 

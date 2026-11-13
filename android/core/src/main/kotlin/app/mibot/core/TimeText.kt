@@ -68,14 +68,15 @@ object TimeText {
     /** A call's length: "00:07", "12:40". */
     fun callLength(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)
-        return "%02d:%02d".format(s / 60, s % 60)
+        // Western digits, like every other number the app shows, whatever language the phone is in.
+        return "%02d:%02d".format(Locale.ROOT, s / 60, s % 60)
     }
 
     /** A file's size: "812 B", "4.2 MB". */
     fun size(bytes: Long): String = when {
         bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "%.0f KB".format(bytes / 1024.0)
-        bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
-        else -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
+        bytes < 1024 * 1024 -> "%.0f KB".format(Locale.ROOT, bytes / 1024.0)
+        bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(Locale.ROOT, bytes / (1024.0 * 1024))
+        else -> "%.1f GB".format(Locale.ROOT, bytes / (1024.0 * 1024 * 1024))
     }
 }

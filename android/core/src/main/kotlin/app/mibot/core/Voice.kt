@@ -120,6 +120,7 @@ class VoiceCall(
     private val notes = ArrayList<String>()
     private var flushWaiting = false
     private var checkJob: Job? = null
+    private val hubClosed = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private fun set(change: (VoiceState) -> VoiceState) = _state.update(change)
 
@@ -132,9 +133,11 @@ class VoiceCall(
                 return@launch
             }
             try {
-                val s = client.voiceSession(botId)
-                sess = s
-                if (ended) { closeOnHub("Cancelled"); return@launch }
+                // Hanging up while this is on its way must still close the call the hub has just opened.
+                val s = withContext(NonCancellable) {
+                    client.voiceSession(botId).also { sess = it; if (ended) closeOnHub("Cancelled") }
+                }
+                if (ended) return@launch
                 connect(s)
             } catch (e: HubException) {
                 end(e.message ?: "Could not start the call")
@@ -152,7 +155,12 @@ class VoiceCall(
 
     private fun connect(s: VoiceSession) {
         // The secret travels the way a browser has to send it: as a sub-protocol name.
-        val req = Request.Builder().url(s.websocketUrl).header("Sec-WebSocket-Protocol", "xai-client-secret.${s.clientSecret}").build()
+        val req = try {
+            Request.Builder().url(s.websocketUrl).header("Sec-WebSocket-Protocol", "xai-client-secret.${s.clientSecret}").build()
+        } catch (e: IllegalArgumentException) {
+            end("Couldn’t connect the call")
+            return
+        }
         ws = http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 send(buildJsonObject { put("type", "session.update"); put("session", s.session) })
@@ -161,6 +169,8 @@ class VoiceCall(
                 val ev = runCatching { HubJson.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
                 scope.launch { handle(ev) }
             }
+            // The service closing first: answer its close, or onClosed never comes.
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null); dropped(reason) }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = dropped(reason)
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = dropped("")
         })
@@ -382,8 +392,10 @@ class VoiceCall(
             task.awaitingNoted = false
             val replies = after.filter { r -> (r.body as? MessageBody)?.let { !it.isUser && !it.streaming } == true }
             val streaming = after.any { (it.body as? MessageBody)?.streaming == true }
-            val finished = live?.isRunning != true && !streaming && (replies.isNotEmpty() || (task.sawRunning && !task.startedBusy)) && now - task.since > 1_500
-            if (!finished) { task.doneSince = null; continue }
+            val looksDone = live?.isRunning != true && !streaming && (replies.isNotEmpty() || (task.sawRunning && !task.startedBusy))
+            if (!looksDone) { task.doneSince = null; continue }
+            if (now - task.since <= 1_500) { recheck = true; continue } // too soon to trust; nothing else may change to wake us
+
             // Stay finished for a moment: two turns queued back to back look idle in between.
             val doneSince = task.doneSince
             if (doneSince == null) { task.doneSince = now; recheck = true; continue }
@@ -443,6 +455,7 @@ class VoiceCall(
     /** Tell the hub the call is over, with what was said. It outlives the call's own scope. */
     private fun closeOnHub(error: String?) {
         val s = sess ?: return
+        if (!hubClosed.compareAndSet(false, true)) return
         val lines = transcript()
         @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
         kotlinx.coroutines.GlobalScope.launch { withContext(NonCancellable) { runCatching { client.voiceEnd(botId, s.callId, lines, error) } } }

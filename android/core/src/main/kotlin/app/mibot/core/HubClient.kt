@@ -41,7 +41,7 @@ data class HubAccount(val url: String, val token: String)
 data class PairLink(val hubUrl: String, val code: String)
 
 @Serializable data class BotsResponse(val bots: List<Bot> = emptyList(), val live: List<LiveState> = emptyList())
-@Serializable data class RowsResponse(val generation: Int = 0, val rows: List<Row> = emptyList())
+@Serializable data class RowsResponse(val generation: Int = 0, @Serializable(with = RowListSerializer::class) val rows: List<Row> = emptyList())
 @Serializable data class MeResponse(val user: User? = null)
 @Serializable data class RoutinesResponse(val routines: List<Routine> = emptyList())
 @Serializable data class ComputerResponse(val computer: ComputerState = ComputerState())
@@ -213,10 +213,18 @@ class HubClient(val account: HubAccount, base: OkHttpClient = defaultHttp, priva
 
         /** What a typed address stands for: `mac-mini:8787` is `http://mac-mini:8787`. */
         fun normalizeUrl(text: String): String? {
-            val t = text.trim().trimEnd('/')
-            if (t.isEmpty()) return null
-            val withScheme = if (Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(t)) t else "http://$t"
-            val u = withScheme.toHttpUrlOrNull() ?: return null
+            val t = text.trim()
+            val m = Regex("^(https?)://(.*)$", RegexOption.IGNORE_CASE).find(t)
+            val scheme = m?.groupValues?.get(1)?.lowercase() ?: "http"
+            val rest = (m?.groupValues?.get(2) ?: t).trimEnd('/')
+            // A slip in the scheme ("http:/mini", "http//mini", "htp://mini") would otherwise make "http" or "htp" the host.
+            if (rest.isEmpty() || Regex("^[^/]*//").containsMatchIn(rest)) return null
+            val hostPort = rest.substringBefore('/').substringBefore('?').substringBefore('#')
+            // A hub's address never carries a name and password ("user:pass@host").
+            if (hostPort.isEmpty() || hostPort.any { it.isWhitespace() || it == '\\' || it == '@' }) return null
+            val afterHost = if (hostPort.startsWith("[")) hostPort.substringAfter("]", "?") else hostPort
+            if (':' in afterHost && !Regex("^[^:]*:\\d{1,5}$").matches(afterHost)) return null
+            val u = "$scheme://$hostPort".toHttpUrlOrNull() ?: return null
             return u.newBuilder().encodedPath("/").query(null).fragment(null).build().toString().trimEnd('/')
         }
 

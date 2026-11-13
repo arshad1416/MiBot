@@ -66,8 +66,19 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
         _state.update { it.copy(online = false) }
     }
 
+    /** Counts events, so a fetch that started before one does not undo it. */
+    private val events = java.util.concurrent.atomic.AtomicLong()
+    private val eventCount get() = events.get()
+    /** Per bot: the count when an event last changed it. */
+    private val touched = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     private suspend fun handle(ev: ServerEvent) {
         _state.value.noticeFor(ev, openBotId)?.let { _notices.tryEmit(it) }
+        when (ev) {
+            is ServerEvent.BotChanged -> touched[ev.bot.id] = events.incrementAndGet()
+            is ServerEvent.Live -> touched[ev.state.botId] = events.incrementAndGet()
+            else -> {}
+        }
         _state.update { it.reduce(ev) }
         when (ev) {
             ServerEvent.Roster -> quietly { loadBots() }
@@ -85,9 +96,13 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
     }
 
     private suspend fun resync() {
+        // Chats read before the line dropped may have missed rows: each is fetched again when it is next opened.
+        _state.update { st -> st.copy(transcripts = st.transcripts.mapValues { (id, t) -> if (id == openBotId) t else t.copy(loaded = false) }) }
         if (_state.value.user == null) client.me()?.let { u -> _state.update { it.copy(user = u) } }
-        loadBots()
-        _state.update { it.copy(computer = client.computer()) }
+        loadBots(announce = true)
+        // Fetched before the update: `update` runs its block again whenever the state changed meanwhile, as it does while a reply streams.
+        val computer = client.computer()
+        _state.update { it.copy(computer = computer) }
         openBotId?.let { loadRows(it) }
         loadApprovals()
     }
@@ -120,14 +135,36 @@ class HubSession(val client: HubClient, private val scope: CoroutineScope) {
         return d
     }
 
-    suspend fun loadBots() {
+    /**
+     * Fetch the bot list. A bot or live state that an event changed after the fetch was asked for keeps
+     * what the event said: the answer was true when the hub wrote it, the event is newer. With
+     * `announce`, what changed while the line was down is told as the events would have told it.
+     */
+    suspend fun loadBots(announce: Boolean = false) {
+        val asked = eventCount
         val r = client.bots()
-        _state.update { it.copy(bots = r.bots, live = r.live.associateBy { l -> l.botId }, ready = true) }
+        val before = _state.value
+        val newer = { id: String -> (touched[id] ?: 0) > asked }
+        _state.update { st ->
+            val bots = r.bots.map { b -> if (newer(b.id)) st.bot(b.id) ?: b else b }
+            val live = r.live.associateBy { it.botId }.mapValues { (id, l) -> if (newer(id)) st.live[id] ?: l else l }
+            st.copy(bots = bots, live = live, ready = true)
+        }
+        if (announce && before.ready) {
+            for (b in r.bots) if (!newer(b.id)) before.noticeFor(ServerEvent.BotChanged(b), openBotId)?.let { _notices.tryEmit(it) }
+            for (l in r.live) if (!newer(l.botId)) before.noticeFor(ServerEvent.Live(l), openBotId)?.let { _notices.tryEmit(it) }
+        }
     }
 
     suspend fun loadRows(botId: String) {
         val r = client.rows(botId)
-        _state.update { it.withRows(botId, r.generation, r.rows, loaded = true, hasEarlier = r.rows.size >= PAGE) }
+        _state.update { st ->
+            val held = st.transcripts[botId]
+            // More than a page was said since what is held: keep the new page alone, or the gap between could never be fetched.
+            val gap = held != null && held.rows.isNotEmpty() && r.rows.isNotEmpty() && r.generation == held.generation && r.rows.first().seq > held.rows.last().seq + 1
+            val base = if (gap) st.copy(transcripts = st.transcripts - botId) else st
+            base.withRows(botId, r.generation, r.rows, loaded = true, hasEarlier = r.rows.size >= PAGE)
+        }
     }
 
     /** Fetch the page of rows before the oldest one held. */

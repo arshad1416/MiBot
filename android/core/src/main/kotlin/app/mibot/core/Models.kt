@@ -1,7 +1,13 @@
 package app.mibot.core
 
 import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonContentPolymorphicSerializer
 import kotlinx.serialization.json.JsonElement
@@ -67,6 +73,21 @@ data class Row(
     val body: RowBody,
     val createdAt: Long = 0,
 )
+
+/**
+ * Rows as a list where one the app cannot read (a hub that changed a field's shape) is left out,
+ * instead of taking the whole page or event with it.
+ */
+object RowListSerializer : KSerializer<List<Row>> {
+    private val plain = ListSerializer(Row.serializer())
+    override val descriptor = plain.descriptor
+    override fun serialize(encoder: Encoder, value: List<Row>) = plain.serialize(encoder, value)
+    override fun deserialize(decoder: Decoder): List<Row> {
+        val json = decoder as? JsonDecoder ?: return plain.deserialize(decoder)
+        val items = json.decodeJsonElement() as? JsonArray ?: throw IllegalArgumentException("rows is not a list")
+        return items.mapNotNull { runCatching { json.json.decodeFromJsonElement(Row.serializer(), it) }.getOrNull() }
+    }
+}
 
 @Serializable(with = RowBodySerializer::class)
 sealed interface RowBody
@@ -304,7 +325,7 @@ data class Approval(
 @Serializable(with = ServerEventSerializer::class)
 sealed interface ServerEvent {
     @Serializable data class Hello(val serverTime: Long = 0) : ServerEvent
-    @Serializable data class Rows(val botId: String, val generation: Int = 0, val rows: List<Row> = emptyList()) : ServerEvent
+    @Serializable data class Rows(val botId: String, val generation: Int = 0, @Serializable(with = RowListSerializer::class) val rows: List<Row> = emptyList()) : ServerEvent
     @Serializable data class Cleared(val botId: String, val generation: Int = 0) : ServerEvent
     @Serializable data class Live(val state: LiveState) : ServerEvent
     @Serializable data object Roster : ServerEvent
