@@ -58,7 +58,12 @@ class Notifier(private val app: MiBotApp) {
         val bot = notice.bot
         when (notice) {
             // Answered here or elsewhere, or ran out: nothing left to tap.
-            is Notice.ApprovalSettled -> return manager.cancel(APPROVAL_TAG, notice.approval.id.hashCode())
+            is Notice.ApprovalSettled -> {
+                manager.cancel(APPROVAL_TAG, notice.approval.id.hashCode())
+                // A "Waiting for you" about the same bot is stale too, whichever device answered.
+                if (waiting.remove(bot.id)) manager.cancel(bot.id.hashCode())
+                return
+            }
             // A request goes through even for a bot that is muted: it holds the bot's work until someone answers.
             is Notice.ApprovalNeeded -> return if (app.store.notifications && allowed) approval(notice) else Unit
             else -> {}
@@ -81,7 +86,11 @@ class Notifier(private val app: MiBotApp) {
             .setAutoCancel(true)
             .build()
         runCatching { manager.notify(bot.id.hashCode(), n) }
+        if (notice is Notice.Waiting) waiting += bot.id else waiting -= bot.id
     }
+
+    /** Bots whose notification now says they are waiting for the person. */
+    private val waiting = java.util.Collections.synchronizedSet(HashSet<String>())
 
     private fun approval(notice: Notice.ApprovalNeeded) {
         val a = notice.approval
@@ -105,7 +114,7 @@ class Notifier(private val app: MiBotApp) {
     }
 
     /** The chat came on screen: what was said about it has been seen. */
-    fun seen(botId: String) = manager.cancel(botId.hashCode())
+    fun seen(botId: String) { waiting -= botId; manager.cancel(botId.hashCode()) }
 
     fun clear() = manager.cancelAll()
 
